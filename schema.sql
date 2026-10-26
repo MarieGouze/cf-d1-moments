@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS memos (
   title TEXT NOT NULL DEFAULT '',
   files_gated INTEGER NOT NULL DEFAULT 0,
   content_gated INTEGER NOT NULL DEFAULT 0,
+  view_password_hash TEXT NOT NULL DEFAULT '',  -- 单条动态观看密码的 sha256，空 = 无密码
   content_md TEXT NOT NULL DEFAULT '',
   tags TEXT NOT NULL DEFAULT '',
   media TEXT NOT NULL DEFAULT '[]',       -- JSON: [{type:'image'|'video', url}]

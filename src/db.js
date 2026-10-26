@@ -78,6 +78,7 @@ export const DEFAULT_SETTINGS = {
   site_lock: '0',
   site_password_hash: '',
   site_gate_token: '',
+  announce_text: '',
   trash_days: '30',
   site_since: '',
   spam_keywords: '博彩,赌场,澳门赌场,威尼斯人,线上棋牌,代开发票,贷款推广,SEO推广,刷单兼职,菠菜,六合彩,时时彩,加微信,微信号,代孕,发票代开',
@@ -122,6 +123,10 @@ export async function initDb(env) {
   // 迁移：memos.content_gated（正文回复后可见：正文、媒体、附加内容整体门控，标题照常显示）
   if (!(cols.results || []).some((c) => c.name === 'content_gated')) {
     await env.DB.prepare('ALTER TABLE memos ADD COLUMN content_gated INTEGER NOT NULL DEFAULT 0').run();
+  }
+  // 迁移：memos.view_password_hash（单条动态观看密码的 sha256；空 = 无密码）
+  if (!(cols.results || []).some((c) => c.name === 'view_password_hash')) {
+    await env.DB.prepare("ALTER TABLE memos ADD COLUMN view_password_hash TEXT NOT NULL DEFAULT ''").run();
   }
   // 建站时间：首次初始化时记为当前时间（页脚「建站第 N 天」用），之后不再变动
   const since = await env.DB.prepare("SELECT value FROM settings WHERE key = 'site_since'").first();

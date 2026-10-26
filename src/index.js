@@ -171,26 +171,42 @@ async function unlockedSet(env, request, memoIds, adminView) {
   return out;
 }
 
+// 单条动态观看密码：带对解锁 cookie（或管理员）才算能看；令牌由密码哈希派生，改密码即失效
+async function viewUnlocked(env, request, memo, settings, adminView) {
+  if (!memo.view_password_hash) return true;
+  if (adminView) return true;
+  const token = await sha256Hex(memo.view_password_hash + ':' + memo.id + ':' + (settings.site_secret || ''));
+  const cookies = parseCookies(request);
+  return cookies['mm_view_' + memo.id] === token;
+}
+
 async function homePage(env, request, url, { tag = '' } = {}) {
   const [settings, adminView] = await Promise.all([getSettings(env), isAdmin(env, request)]);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1);
   const { memos, hasMore } = await listMemos(env, { page, tag, adminView });
   // 点赞/解锁/标签/每条动态的评论原本逐个串行查（一页 10 条就是十几趟），改为全部并行
   const ids = memos.map((m) => m.id);
-  const [liked, unlocked, tags, commentsList] = await Promise.all([
+  const [liked, unlocked, tags, viewOk] = await Promise.all([
     likedSet(env, request, ids),
     unlockedSet(env, request, ids, adminView),
     allTags(env, adminView),
-    Promise.all(memos.map((m) => approvedComments(env, m.id, 500))),
+    Promise.all(memos.map((m) => viewUnlocked(env, request, m, settings, adminView))),
   ]);
+  const commentsList = await Promise.all(
+    memos.map((m, i) => (viewOk[i] ? approvedComments(env, m.id, 500) : Promise.resolve([])))
+  );
   const cards = memos.map((m, i) =>
-    memoCard(m, settings, { comments: commentsList[i], liked: liked.has(m.id), isAdmin: adminView, filesUnlocked: unlocked.has(m.id) })
+    memoCard(m, settings, { comments: commentsList[i], liked: liked.has(m.id), isAdmin: adminView, filesUnlocked: unlocked.has(m.id), pwLocked: !viewOk[i] })
   );
   const base = tag ? `/tag/${encodeURIComponent(tag)}` : '/';
+  const announce = (settings.announce_text || '').trim();
+  const mq = announce
+    ? `<div class="marquee"><span class="mq-ico">📢</span><div class="mq-track"><span class="mq-text" style="animation-duration:${Math.max(8, Math.round(announce.length * 0.55))}s">${escapeXml(announce)}</span></div></div>`
+    : '';
   const body = `
     ${noticeHtml(url.searchParams.get('c'))}
     ${tag ? `<div class="notice">正在看标签 <b>#${escapeXml(tag)}</b> 的动态，<a href="/">看全部</a></div>` : ''}
-    <div class="feed-box">${cards.join('<div class="memo-sep"></div>') || '<div class="memo">还没有动态。</div>'}${linksBlock(settings)}</div>
+    <div class="feed-box">${mq}${cards.join('<div class="memo-sep"></div>') || '<div class="memo">还没有动态。</div>'}${linksBlock(settings)}</div>
     ${pagerHtml(page, hasMore, base)}
     ${tagChipsScript(tags, tag)}`;
   return htmlResponse(layout(await withUsage(env, settings), { title: tag ? `#${tag} · ${settings.site_name}` : settings.site_name, body, activeTag: tag, adminView }));
@@ -208,18 +224,35 @@ async function memoDetail(env, request, id) {
   if (!memo || (!adminView && (memo.created_at > nowSec() || memo.hidden))) {
     return htmlResponse(layout(settings, { title: '没有找到', body: '<div class="memo">这条动态不存在。</div>', adminView }), 404);
   }
-  const comments = await approvedComments(env, id, 500);
+  const url = new URL(request.url);
+  const viewOk = await viewUnlocked(env, request, memo, settings, adminView);
+  const comments = viewOk ? await approvedComments(env, id, 500) : [];
   const liked = await likedSet(env, request, [id]);
   const unlocked = await unlockedSet(env, request, [id], adminView);
-  const url = new URL(request.url);
-  const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, filesUnlocked: unlocked.has(id) })}</div>
+  let unlockErr = '';
+  if (!viewOk) {
+    if (url.searchParams.get('e') === 'lock') {
+      unlockErr = `密码错误次数过多，请约 ${escapeXml(url.searchParams.get('m') || '10')} 分钟后再试。`;
+    } else if (url.searchParams.get('e')) {
+      const n = url.searchParams.get('n');
+      unlockErr = `密码不对，请重试。${n ? `（已错 ${escapeXml(n)} 次，错满 5 次将暂停 10 分钟）` : ''}`;
+    }
+  }
+  const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, filesUnlocked: unlocked.has(id), pwLocked: !viewOk, unlockErr })}</div>
     <div class="pager"><a href="/">← 回到时间线</a></div>`;
-  return htmlResponse(layout(await withUsage(env, settings), { title: `${memo.title || plainTextExcerpt(memo.content_md, 40) || settings.site_name} · ${settings.site_name}`, body, adminView }));
+  const pageTitle = memo.title || (viewOk ? plainTextExcerpt(memo.content_md, 40) : '') || settings.site_name;
+  return htmlResponse(layout(await withUsage(env, settings), { title: `${pageTitle} · ${settings.site_name}`, body, adminView }));
 }
 
 async function likePost(env, request, id) {
-  const memo = await env.DB.prepare('SELECT id FROM memos WHERE id = ?').bind(id).first();
+  const memo = await env.DB.prepare('SELECT id, view_password_hash FROM memos WHERE id = ?').bind(id).first();
   if (!memo) return Response.json({ error: 'not found' }, { status: 404 });
+  if (memo.view_password_hash) {
+    const settings = await getSettings(env);
+    if (!(await viewUnlocked(env, request, memo, settings, await isAdmin(env, request)))) {
+      return Response.json({ error: 'locked' }, { status: 401 });
+    }
+  }
   const ipHash = await sha256Hex(clientIp(request));
   const existing = await env.DB.prepare('SELECT memo_id FROM likes WHERE memo_id = ? AND ip_hash = ?').bind(id, ipHash).first();
   let liked;
@@ -238,8 +271,11 @@ async function commentPost(env, request, id) {
   const settings = await getSettings(env);
   const back = `/memo/${id}`;
   if (settings.comments_enabled !== '1') return redirect(`${back}?c=closed`);
-  const memo = await env.DB.prepare('SELECT id FROM memos WHERE id = ?').bind(id).first();
+  const memo = await env.DB.prepare('SELECT id, view_password_hash FROM memos WHERE id = ?').bind(id).first();
   if (!memo) return redirect('/');
+  if (memo.view_password_hash && !(await viewUnlocked(env, request, memo, settings, await isAdmin(env, request)))) {
+    return redirect(back);
+  }
   const form = await request.formData();
   const name = String(form.get('name') || '').replace(/["'<>]/g, '').trim().slice(0, 20);
   const content = String(form.get('content') || '').trim().slice(0, 500);
@@ -316,8 +352,8 @@ async function feed(env) {
   const { memos } = await listMemos(env, { page: 1 });
   const items = memos
     .map((m) => {
-      const text = m.title || (m.content_gated ? '（回复后可见）' : plainTextExcerpt(m.content_md, 120) || '（图片动态）');
-      const desc = m.content_gated ? '本动态内容需回复后可见' : plainTextExcerpt(m.content_md, 300);
+      const text = m.title || (m.view_password_hash ? '（密码保护）' : m.content_gated ? '（回复后可见）' : plainTextExcerpt(m.content_md, 120) || '（图片动态）');
+      const desc = m.view_password_hash ? '本动态已设密码保护，请到网站输入密码查看' : m.content_gated ? '本动态内容需回复后可见' : plainTextExcerpt(m.content_md, 300);
       return `<item><title>${escapeXml(text)}</title><link>/memo/${m.id}</link><guid>/memo/${m.id}</guid><pubDate>${new Date(m.created_at * 1000).toUTCString()}</pubDate><description>${escapeXml(desc)}</description></item>`;
     })
     .join('');
@@ -457,6 +493,9 @@ export default {
       }
       if ((m = path.match(/^\/memo\/(\d+)\/comment$/)) && method === 'POST') {
         return commentPost(env, request, Number(m[1]));
+      }
+      if ((m = path.match(/^\/memo\/(\d+)\/unlock$/)) && method === 'POST') {
+        return admin.memoUnlock(env, request, Number(m[1]));
       }
       return new Response('Not Found', { status: 404 });
     } catch (err) {

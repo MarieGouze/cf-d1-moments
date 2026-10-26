@@ -161,6 +161,12 @@ svg.cmt-ava .fg{fill:var(--sub)}
 [data-theme="dark"] .gh-ico{filter:invert(1)}
 .foot-gh:hover{text-decoration:underline}
 .foot-note .admin-link:hover{text-decoration:underline}
+.marquee{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:14px;color:var(--text)}
+.mq-ico{flex:none}
+.mq-track{flex:1;overflow:hidden;white-space:nowrap}
+.mq-text{display:inline-block;padding-left:100%;animation:mqscroll linear infinite}
+.marquee:hover .mq-text{animation-play-state:paused}
+@keyframes mqscroll{from{transform:translateX(0)}to{transform:translateX(-100%)}}
 .notice{background:#fff7e0;border:1px solid #f0dfa0;color:#6b5c14;border-radius:10px;padding:10px 14px;margin:12px 0;font-size:14px}
 [data-theme="dark"] .notice{background:#33300f;color:#e8d98a;border-color:#55501f}
 .pin{color:#e0a52e;font-size:12px;margin-left:6px}
@@ -388,7 +394,7 @@ function contentHtml(memo, detail) {
   return renderContent(memo.content_md);
 }
 
-export function memoCard(memo, settings, { comments = [], liked = false, detail = false, isAdmin = false, filesUnlocked = false } = {}) {
+export function memoCard(memo, settings, { comments = [], liked = false, detail = false, isAdmin = false, filesUnlocked = false, pwLocked = false, unlockErr = '' } = {}) {
   const media = parseJsonSafe(memo.media, []);
   const tags = String(memo.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
   const avatarStyle = settings.avatar_url
@@ -444,8 +450,9 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       .map((r) => row(r, r.id) + (byParent.get(r.id) || []).map((c) => `<div class="replies">${row(c, r.id)}</div>`).join(''))
       .join('')}</div>`;
   }
+  if (pwLocked) cmtHtml = '';
   const cmtForm =
-    (detail || isAdmin) && settings.comments_enabled === '1'
+    (detail || isAdmin) && !pwLocked && settings.comments_enabled === '1'
       ? `<div class="cmt-form" id="cmt-form-${memo.id}">
           <form method="post" action="/memo/${memo.id}/comment">
             <input type="text" name="website" tabindex="-1" autocomplete="off" style="display:none" aria-hidden="true">
@@ -467,12 +474,14 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     <div class="memo-head">
       <div class="${avatarCls}" ${avatarStyle}>${avatarInner}</div>
       <div>
-        <div class="m-nick">${esc(settings.nickname)}${memo.pinned ? '<span class="pin">📌 置顶</span>' : ''}${memo.hidden && isAdmin ? '<span class="pin" style="color:#999">🔒 隐藏</span>' : ''}</div>
+        <div class="m-nick">${esc(settings.nickname)}${memo.pinned ? '<span class="pin">📌 置顶</span>' : ''}${memo.hidden && isAdmin ? '<span class="pin" style="color:#999">🔒 隐藏</span>' : ''}${memo.view_password_hash && isAdmin ? '<span class="pin">🔑 密码</span>' : ''}</div>
       </div>
     </div>
     <div class="m-body">
       ${memo.title ? `<div class="m-title">${esc(memo.title)}</div>` : ''}
-      ${(memo.content_gated && !filesUnlocked)
+      ${pwLocked
+        ? `<div class="files-gated">🔒 此动态已设密码保护${detail ? '' : `，<a href="/memo/${memo.id}">输入密码查看 →</a>`}</div>${detail ? `${unlockErr ? `<div style="color:#e5484d;margin-top:8px;font-size:14px">${unlockErr}</div>` : ''}<form method="post" action="/memo/${memo.id}/unlock" style="margin-top:8px;display:flex;gap:8px"><input type="password" name="password" placeholder="输入观看密码" required style="flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text)"><button class="btn" type="submit">查看</button></form>` : ''}`
+        : (memo.content_gated && !filesUnlocked)
         ? `<div class="files-gated">🔒 本动态内容需回复后可见，<a href="${detail ? '#comments' : `/memo/${memo.id}#comments`}">评论后即可查看</a></div>`
         : `<div class="m-content">${contentHtml(memo, detail)}</div>
       ${mediaGrid(media)}
@@ -488,10 +497,10 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       ${isAdmin ? `<a class="act" href="/admin/memos/${memo.id}/edit" style="text-decoration:none">✏️ 编辑</a>` : ''}
       ${isAdmin ? `<form method="post" action="/admin/memos/${memo.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条动态？评论和点赞会一并移入垃圾桶。')"><button class="act" type="submit" style="color:#e5484d">&#x1F5D1;&#xFE0E; 删除</button></form>` : ''}
       <span class="spacer"></span>
-      <button class="act${liked ? ' liked' : ''}" onclick="likeMemo(${memo.id},this)">❤ <span class="lc">${memo.like_count || 0}</span></button>
+      ${pwLocked ? '' : `<button class="act${liked ? ' liked' : ''}" onclick="likeMemo(${memo.id},this)">❤ <span class="lc">${memo.like_count || 0}</span></button>
       ${(detail || isAdmin)
         ? `<button class="act" onclick="toggleCmt(${memo.id})">💬 ${memo.comment_count || 0}</button>`
-        : `<a class="act" href="/memo/${memo.id}#comments" style="text-decoration:none">💬 ${memo.comment_count || 0}</a>`}
+        : `<a class="act" href="/memo/${memo.id}#comments" style="text-decoration:none">💬 ${memo.comment_count || 0}</a>`}`}
     </div>
     <div id="comments">${cmtHtml}${cmtForm}</div>
   </article>`;

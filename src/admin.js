@@ -244,6 +244,43 @@ export async function gateSettingsSave(env, request) {
   return redirect('/admin/settings?gok=1');
 }
 
+// ---------------- 单条动态观看密码 ----------------
+// 解锁 cookie 名 mm_view_<id>，值 = sha256(密码哈希:memoId:site_secret)：
+// 管理员改密码后哈希变，旧 cookie 自动失效；防爆破与密码门共用锁（vlock:<id>: 前缀）。
+
+export async function memoUnlock(env, request, id) {
+  const back = `/memo/${id}`;
+  const memo = await env.DB.prepare('SELECT id, view_password_hash FROM memos WHERE id = ?').bind(id).first();
+  if (!memo || !memo.view_password_hash) return redirect(back);
+  const ip = request.headers.get('CF-Connecting-IP') || 'local';
+  const prefix = `vlock:${id}:`;
+  const now = Math.floor(Date.now() / 1000);
+  const rec = await getLock(env, ip, prefix);
+  if (rec.u && rec.u > now) {
+    return redirect(`${back}?e=lock&m=${Math.ceil((rec.u - now) / 60)}`);
+  }
+  const form = await request.formData();
+  const pw = String(form.get('password') || '');
+  if ((await sha256Hex(pw)) !== memo.view_password_hash) {
+    const nx = now - (rec.w || 0) > 900 ? { n: 0, w: now, u: 0 } : rec;
+    nx.n = (nx.n || 0) + 1;
+    if (!nx.w) nx.w = now;
+    if (nx.n >= 5) {
+      nx.u = now + 600;
+      await setLock(env, ip, nx, prefix);
+      return redirect(`${back}?e=lock&m=10`);
+    }
+    await setLock(env, ip, nx, prefix);
+    return redirect(`${back}?e=1&n=${nx.n}`);
+  }
+  await clearLock(env, ip, prefix);
+  const s = await getSettings(env);
+  const token = await sha256Hex(memo.view_password_hash + ':' + id + ':' + (s.site_secret || ''));
+  return redirect(back, {
+    'Set-Cookie': `mm_view_${id}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${30 * 24 * 3600}`,
+  });
+}
+
 export async function logout(env, request) {
   await destroySession(env, request);
   return redirect('/', { 'Set-Cookie': clearSessionCookie });
@@ -293,7 +330,7 @@ export function buildExt(type, f) {
 
 function memoForm(memo, settings) {
   const isNew = !memo;
-  memo = memo || { title: '', content_md: '', tags: '', media: '[]', ext_type: '', ext_data: '{}', pinned: 0, hidden: 0, files_gated: 0, content_gated: 0, created_at: nowSec() };
+  memo = memo || { title: '', content_md: '', tags: '', media: '[]', ext_type: '', ext_data: '{}', pinned: 0, hidden: 0, files_gated: 0, content_gated: 0, view_password_hash: '', created_at: nowSec() };
   const ext = parseJsonSafe(memo.ext_data, {});
   const media = parseJsonSafe(memo.media, []);
   const initialHtml = memo.content_md ? renderContent(memo.content_md) : '';
@@ -384,6 +421,9 @@ function memoForm(memo, settings) {
     <label style="display:block;margin:8px 0"><input type="checkbox" name="hidden" value="1" style="width:auto" ${memo.hidden ? 'checked' : ''}> 隐藏（仅自己在登录状态下可见，游客看不到）</label>
     <label style="display:block;margin:8px 0"><input type="checkbox" name="files_gated" value="1" style="width:auto" ${memo.files_gated ? 'checked' : ''}> 附件文件回复后可见（游客在这条动态下评论后，才能看到下载文件；图片、视频不受影响）</label>
     <label style="display:block;margin:8px 0"><input type="checkbox" name="content_gated" value="1" style="width:auto" ${memo.content_gated ? 'checked' : ''}> 正文回复后可见（游客评论后才能看正文、图片和附件；标题照常显示，勾了这个就不必再勾上一项）</label>
+    <label>观看密码（可选${memo.view_password_hash ? '，已设置' : ''}；留空 = ${memo.view_password_hash ? '不修改' : '不设密码'}；设了后访客输对密码才能看这条的正文、图片、附件与评论，输对一次 30 天免输）</label>
+    <input type="password" name="view_password" autocomplete="new-password" placeholder="至少 4 位">
+    ${memo.view_password_hash ? '<label style="display:block;margin:8px 0"><input type="checkbox" name="view_password_clear" value="1" style="width:auto"> 清除观看密码（取消这条的密码保护）</label>' : ''}
     <button class="btn" type="submit">${isNew ? '发布' : '保存修改'}</button>
     <a href="/admin" style="margin-left:10px">取消</a>
   </form></div>
@@ -572,18 +612,32 @@ export async function memoSave(env, request, id) {
   if (!content && parseJsonSafe(media, []).length === 0 && !ext.type) {
     return page('内容为空', `<div class="card"><div class="err">文字、图片、附加内容至少要有一项。</div><a href="/admin">← 返回</a></div>`);
   }
+  // 观看密码：填了新密码（≥4 位）就更新哈希；勾了清除就取消；都没有则保持原样
+  let viewPwHash = '';
+  if (id) {
+    const old0 = await env.DB.prepare('SELECT view_password_hash FROM memos WHERE id = ?').bind(id).first();
+    viewPwHash = (old0 && old0.view_password_hash) || '';
+  }
+  if (f.get('view_password_clear')) viewPwHash = '';
+  const vpw = String(f.get('view_password') || '');
+  if (vpw) {
+    if (vpw.length < 4) {
+      return page('观看密码太短', `<div class="card"><div class="err">观看密码至少 4 位，这次没有保存。</div><a href="javascript:history.back()">← 返回修改</a></div>`);
+    }
+    viewPwHash = await sha256Hex(vpw);
+  }
   if (id) {
     const old = await env.DB.prepare('SELECT created_at FROM memos WHERE id = ?').bind(id).first();
     if (!old) return redirect('/admin');
     const created = fromLocalInput(String(f.get('created_at') || ''), old.created_at);
     await env.DB.prepare(
-      'UPDATE memos SET title=?, content_md=?, tags=?, media=?, ext_type=?, ext_data=?, pinned=?, hidden=?, files_gated=?, content_gated=?, created_at=?, updated_at=? WHERE id=?'
-    ).bind(title, content, tags, media, ext.type, JSON.stringify(ext.data), pinned, hiddenPost, filesGated, contentGated, created, now, id).run();
+      'UPDATE memos SET title=?, content_md=?, tags=?, media=?, ext_type=?, ext_data=?, pinned=?, hidden=?, files_gated=?, content_gated=?, view_password_hash=?, created_at=?, updated_at=? WHERE id=?'
+    ).bind(title, content, tags, media, ext.type, JSON.stringify(ext.data), pinned, hiddenPost, filesGated, contentGated, viewPwHash, created, now, id).run();
   } else {
     const created = fromLocalInput(String(f.get('created_at') || ''), now);
     await env.DB.prepare(
-      'INSERT INTO memos (title, content_md, tags, media, ext_type, ext_data, pinned, hidden, files_gated, content_gated, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
-    ).bind(title, content, tags, media, ext.type, JSON.stringify(ext.data), pinned, hiddenPost, filesGated, contentGated, created, now).run();
+      'INSERT INTO memos (title, content_md, tags, media, ext_type, ext_data, pinned, hidden, files_gated, content_gated, view_password_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    ).bind(title, content, tags, media, ext.type, JSON.stringify(ext.data), pinned, hiddenPost, filesGated, contentGated, viewPwHash, created, now).run();
   }
   return redirect('/admin');
 }
@@ -875,6 +929,7 @@ export async function settingsPage(env, url) {
       <label>站点名称</label><input name="site_name" value="${esc(s.site_name)}">
       <label>昵称（显示在封面与每条动态上）</label><input name="nickname" value="${esc(s.nickname)}">
       <label>个性签名</label><input name="signature" value="${esc(s.signature)}">
+      <label>公告（跑马灯：显示在首页时间线顶部横向滚动；留空 = 不显示）</label><input name="announce_text" value="${esc(s.announce_text || '')}" maxlength="200" placeholder="例如：欢迎来到我的朋友圈，本站已开启……">
       <label>头像图片（上传后自动保存替换，也可以直接填地址）</label>
       ${s.avatar_url ? `<img class="upl-prev" src="${esc(s.avatar_url)}" alt="">` : ''}
       <div class="upl-row"><input name="avatar_url" value="${esc(s.avatar_url)}" placeholder="/media/… 或 https://…"><label class="btn upl-btn">上传替换<input type="file" accept="image/*" data-for="avatar_url" hidden></label></div>
@@ -954,6 +1009,7 @@ export async function settingsSave(env, request) {
   await setSetting(env, 'site_name', f.get('site_name'));
   await setSetting(env, 'nickname', f.get('nickname'));
   await setSetting(env, 'signature', f.get('signature'));
+  await setSetting(env, 'announce_text', String(f.get('announce_text') || '').trim().slice(0, 200));
   await setSetting(env, 'avatar_url', f.get('avatar_url'));
   await setSetting(env, 'cover_url', f.get('cover_url'));
   await setSetting(env, 'comments_enabled', f.get('comments_enabled') ? '1' : '0');
