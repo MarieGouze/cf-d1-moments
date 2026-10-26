@@ -1,0 +1,20 @@
+{
+  // cf-d1-moments：极简朋友圈（Workers + D1 + R2）
+  // 注意：不要在这里加 vars —— 管理员密码等配置都存 D1，避免部署时互相覆盖。
+  "name": "cf-d1-moments",
+  "main": "src/index.js",
+  "compatibility_date": "2025-01-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cf-d1-moments-db",
+      "database_id": "YOUR_D1_DATABASE_ID"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "cf-d1-moments-media"
+    }
+  ]
+}
