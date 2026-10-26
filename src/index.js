@@ -1,5 +1,5 @@
 // cf-d1-moments：极简朋友圈（仿 kingwrcy/moments 版面，Cloudflare Workers + D1 + R2 重写）
-import { initDb, getSettings, isAdmin } from './db.js';
+import { initDb, getSettings, isAdmin, gateCookieOk } from './db.js';
 import { layout, memoCard, tagChipsScript, linksBlock, pagerHtml, noticeHtml, timeAgo } from './render.js';
 import * as admin from './admin.js';
 import {
@@ -356,6 +356,18 @@ export default {
     try {
       await initDb(env);
 
+      // 全站密码门：开启后，未解锁的访客只能打开输密码页；
+      // 后台路径、输密码页与站点图标不受影响，管理员登录状态直接放行。
+      if (!path.startsWith('/admin') && path !== '/gate' && path !== '/favicon.png' && path !== '/favicon.ico') {
+        const gs = await getSettings(env);
+        if (gs.site_lock === '1' && gs.site_password_hash) {
+          if (!(await isAdmin(env, request)) && !gateCookieOk(request, gs)) {
+            if (method === 'GET') return redirect('/gate?next=' + encodeURIComponent(path + (url.search || '')));
+            return new Response('本站已开启访问密码，请先在浏览器中打开首页输入密码后再试。', { status: 401 });
+          }
+        }
+      }
+
       // 前台页面浏览计入到访人数（不阻塞响应）
       if (method === 'GET' && (path === '/' || path.startsWith('/memo/') || path.startsWith('/tag/'))) {
         ctx.waitUntil(recordVisit(env, request));
@@ -419,6 +431,7 @@ export default {
         if (path === '/admin/settings' && method === 'GET') return admin.settingsPage(env, url);
         if (path === '/admin/settings' && method === 'POST') return admin.settingsSave(env, request);
         if (path === '/admin/settings/password' && method === 'POST') return admin.passwordChange(env, request);
+        if (path === '/admin/settings/gate' && method === 'POST') return admin.gateSettingsSave(env, request);
         if (path === '/admin/upload' && method === 'POST') return admin.upload(env, request);
         if (path === '/admin/export' && method === 'GET') return admin.exportAll(env);
         if (path === '/admin/export-zip' && method === 'GET') return admin.exportZip(env);
@@ -428,6 +441,9 @@ export default {
       }
 
       // ---------- 前台 ----------
+      if (path === '/gate') {
+        return method === 'GET' ? admin.gatePage(env, url) : admin.gatePost(env, request);
+      }
       if (path === '/' && method === 'GET') return homePage(env, request, url);
       let m;
       if ((m = path.match(/^\/tag\/(.+)$/)) && method === 'GET') {

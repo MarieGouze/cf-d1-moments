@@ -2,9 +2,9 @@
 // 管理员密码哈希只存 D1 settings（admin_password_hash），部署不会冲掉。
 import {
   getSettings, setSetting, createSession, destroySession, isAdmin,
-  sessionCookie, clearSessionCookie, parseTags, parseJsonSafe, effectiveAdminHash,
+  sessionCookie, clearSessionCookie, parseTags, parseJsonSafe, effectiveAdminHash, gateCookie,
 } from './db.js';
-import { sha256Hex, nowSec, escapeHtml as esc, htmlResponse, redirect, clientIp } from './utils.js';
+import { sha256Hex, randomToken, nowSec, escapeHtml as esc, htmlResponse, redirect, clientIp } from './utils.js';
 import { renderContent, excerptOf } from './richtext.js';
 
 const ACSS = `
@@ -106,19 +106,20 @@ export async function setupPost(env, request) {
 
 // ---------------- 登录 ----------------
 
-// 登录防爆破：同一 IP 15 分钟内错满 5 次，暂停登录 10 分钟；成功登录清零。记录存 settings 表 llock:<IP>
-async function getLock(env, ip) {
-  const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind('llock:' + ip).first();
+// 登录防爆破：同一 IP 15 分钟内错满 5 次，暂停登录 10 分钟；成功登录清零。
+// 记录存 settings 表，key 前缀区分场景：llock:（后台登录）/ glock:（全站密码门），后跟 IP。
+async function getLock(env, ip, prefix = 'llock:') {
+  const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(prefix + ip).first();
   if (!row) return { n: 0, w: 0, u: 0 };
   try { return JSON.parse(row.value); } catch { return { n: 0, w: 0, u: 0 }; }
 }
-async function setLock(env, ip, rec) {
+async function setLock(env, ip, rec, prefix = 'llock:') {
   await env.DB.prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-  ).bind('llock:' + ip, JSON.stringify(rec)).run();
+  ).bind(prefix + ip, JSON.stringify(rec)).run();
 }
-async function clearLock(env, ip) {
-  await env.DB.prepare('DELETE FROM settings WHERE key = ?').bind('llock:' + ip).run();
+async function clearLock(env, ip, prefix = 'llock:') {
+  await env.DB.prepare('DELETE FROM settings WHERE key = ?').bind(prefix + ip).run();
 }
 
 export async function loginPage(env, url) {
@@ -165,6 +166,82 @@ export async function loginPost(env, request) {
   await clearLock(env, ip);
   const session = await createSession(env);
   return redirect('/admin', { 'Set-Cookie': sessionCookie(session) });
+}
+
+// ---------------- 全站访问密码（密码门） ----------------
+
+function safeNext(raw) {
+  const nx = String(raw || '/');
+  return nx.startsWith('/') && !nx.startsWith('//') ? nx : '/';
+}
+
+export async function gatePage(env, url) {
+  const s = await getSettings(env);
+  if (s.site_lock !== '1' || !s.site_password_hash) return redirect('/');
+  let err = '';
+  if (url.searchParams.get('e') === 'lock') {
+    err = `<div class="err">密码错误次数过多，已暂停，请约 ${esc(url.searchParams.get('m') || '10')} 分钟后再试。</div>`;
+  } else if (url.searchParams.get('e')) {
+    const n = url.searchParams.get('n');
+    err = `<div class="err">密码不对，请重试。${n ? `（已错 ${esc(n)} 次，错满 5 次将暂停 10 分钟）` : ''}</div>`;
+  }
+  const next = safeNext(url.searchParams.get('next'));
+  return page('需要密码', `
+    <div class="card"><h1>🔐 ${esc(s.site_name || '朋友圈')}</h1>${err}
+    <p class="hint">本站已开启访问密码，输入密码后可浏览（30 天内不用重复输入）。</p>
+    <form method="post" action="/gate">
+      <input type="hidden" name="next" value="${esc(next)}">
+      <label>访问密码</label><input name="password" type="password" required autofocus>
+      <button class="btn" type="submit">进入</button>
+    </form>
+    <p class="hint"><a href="/admin/login">管理员登录 →</a></p></div>`);
+}
+
+export async function gatePost(env, request) {
+  const s = await getSettings(env);
+  if (s.site_lock !== '1' || !s.site_password_hash) return redirect('/');
+  const ip = request.headers.get('CF-Connecting-IP') || 'local';
+  const now = Math.floor(Date.now() / 1000);
+  const rec = await getLock(env, ip, 'glock:');
+  if (rec.u && rec.u > now) {
+    return redirect(`/gate?e=lock&m=${Math.ceil((rec.u - now) / 60)}`);
+  }
+  const form = await request.formData();
+  const pw = String(form.get('password') || '');
+  const next = safeNext(form.get('next'));
+  if ((await sha256Hex(pw)) !== s.site_password_hash) {
+    const nx = now - (rec.w || 0) > 900 ? { n: 0, w: now, u: 0 } : rec;
+    nx.n = (nx.n || 0) + 1;
+    if (!nx.w) nx.w = now;
+    if (nx.n >= 5) {
+      nx.u = now + 600;
+      await setLock(env, ip, nx, 'glock:');
+      return redirect('/gate?e=lock&m=10');
+    }
+    await setLock(env, ip, nx, 'glock:');
+    return redirect(`/gate?e=1&n=${nx.n}&next=${encodeURIComponent(next)}`);
+  }
+  await clearLock(env, ip, 'glock:');
+  if (!s.site_gate_token) return redirect('/');
+  return redirect(next, { 'Set-Cookie': gateCookie(s.site_gate_token) });
+}
+
+export async function gateSettingsSave(env, request) {
+  const f = await request.formData();
+  const s = await getSettings(env);
+  const pw = String(f.get('site_password') || '');
+  let hash = s.site_password_hash || '';
+  if (pw) {
+    if (pw.length < 4) return redirect('/admin/settings?gerr=len');
+    hash = await sha256Hex(pw);
+    await setSetting(env, 'site_password_hash', hash);
+    // 重设密码即轮换解锁令牌：所有访客要重新输一次新密码
+    await setSetting(env, 'site_gate_token', randomToken() + randomToken());
+  }
+  const want = f.get('site_lock') ? '1' : '0';
+  if (want === '1' && !hash) return redirect('/admin/settings?gerr=need');
+  await setSetting(env, 'site_lock', want);
+  return redirect('/admin/settings?gok=1');
 }
 
 export async function logout(env, request) {
@@ -787,7 +864,12 @@ export async function settingsPage(env, url) {
   const msg = url.searchParams.get('ok') ? '<div class="ok">已保存。</div>' : '';
   const perr = url.searchParams.get('perr') ? '<div class="err">改密失败：当前密码不对，或新密码不足 6 位 / 两次不一致。</div>' : '';
   const pok = url.searchParams.get('pok') ? '<div class="ok">密码已修改，新密码保存在数据库中。</div>' : '';
-  return page('后台 · 站点设置', `${nav()}${msg}${perr}${pok}
+  const gok = url.searchParams.get('gok') ? '<div class="ok">全站访问密码设置已保存。</div>' : '';
+  const gerr = url.searchParams.get('gerr') === 'need'
+    ? '<div class="err">要开启全站密码，请先在下面设置一个访问密码。</div>'
+    : url.searchParams.get('gerr') === 'len'
+      ? '<div class="err">访问密码至少 4 位。</div>' : '';
+  return page('后台 · 站点设置', `${nav()}${msg}${perr}${pok}${gok}${gerr}
     <div class="card"><h2>站点设置</h2>
     <form method="post" action="/admin/settings">
       <label>站点名称</label><input name="site_name" value="${esc(s.site_name)}">
@@ -810,6 +892,14 @@ export async function settingsPage(env, url) {
       <label>友情链接（每行一条：名称|网址）</label>
       <textarea name="links" rows="4" placeholder="朋友的小站|https://example.com">${esc(links)}</textarea>
       <button class="btn" type="submit">保存设置</button>
+    </form></div>
+    <div class="card"><h2>全站访问密码</h2>
+    <form method="post" action="/admin/settings/gate">
+      <label style="display:block;margin:8px 0"><input type="checkbox" name="site_lock" value="1" style="width:auto" ${s.site_lock === '1' ? 'checked' : ''}> 开启全站密码（访客输对密码才能浏览全站，管理员登录状态不受影响）</label>
+      <label>访问密码（${s.site_password_hash ? '已设置' : '尚未设置'}；留空 = 不修改）</label>
+      <input name="site_password" type="password" autocomplete="new-password" placeholder="至少 4 位">
+      <p class="hint">访客输对一次后 30 天内免输；重新设置密码会让所有访客重新输入新密码。图片、附件与 RSS 也一并受保护，后台路径 /admin 不受影响。</p>
+      <button class="btn" type="submit">保存</button>
     </form></div>
     <div class="card"><h2>修改管理员密码</h2>
     <form method="post" action="/admin/settings/password">
@@ -912,7 +1002,7 @@ async function buildExportObject(env) {
   for (const t of ['memos', 'comments', 'likes', 'media', 'settings']) {
     if (t === 'settings') {
       const { results } = await env.DB.prepare(
-        "SELECT key, value FROM settings WHERE key NOT IN ('admin_password_hash','site_secret','setup_token_hash')"
+        "SELECT key, value FROM settings WHERE key NOT IN ('admin_password_hash','site_secret','setup_token_hash','site_password_hash','site_gate_token')"
       ).all();
       out[t] = results;
     } else {
@@ -1112,7 +1202,7 @@ async function unzipAll(buf) {
   return files;
 }
 
-const PROTECTED_SETTING_KEYS = new Set(['admin_password_hash', 'site_secret', 'setup_token_hash']);
+const PROTECTED_SETTING_KEYS = new Set(['admin_password_hash', 'site_secret', 'setup_token_hash', 'site_password_hash', 'site_gate_token']);
 
 async function restoreFromData(env, data, mediaFiles) {
   if (!data || !Array.isArray(data.memos) || !Array.isArray(data.comments)) {

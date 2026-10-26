@@ -75,6 +75,9 @@ export const DEFAULT_SETTINGS = {
   signature: '记录生活，留住瞬间。',
   comments_enabled: '1',
   comments_moderation: '1',
+  site_lock: '0',
+  site_password_hash: '',
+  site_gate_token: '',
   trash_days: '30',
   site_since: '',
   spam_keywords: '博彩,赌场,澳门赌场,威尼斯人,线上棋牌,代开发票,贷款推广,SEO推广,刷单兼职,菠菜,六合彩,时时彩,加微信,微信号,代孕,发票代开',
@@ -196,6 +199,21 @@ export function sessionCookie(token) {
 }
 
 export const clearSessionCookie = 'mm_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
+
+// ---------- 全站访问密码（密码门） ----------
+// 访客输对密码后下发 mm_gate cookie，值为 settings.site_gate_token；
+// 管理员在后台重设全站密码时轮换 token，所有访客的旧 cookie 自动失效。
+
+export function gateCookieOk(request, s) {
+  if (!s.site_gate_token) return false;
+  const c = request.headers.get('Cookie') || '';
+  const m = c.match(/(?:^|;\s*)mm_gate=([A-Za-z0-9_-]+)/);
+  return !!m && m[1] === s.site_gate_token;
+}
+
+export function gateCookie(token) {
+  return `mm_gate=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${30 * 24 * 3600}`;
+}
 
 // ---------- 动态 ----------
 
