@@ -21,7 +21,7 @@ async function listMemos(env, { page = 1, tag = '', adminView = false } = {}) {
   const { results } = await env.DB.prepare(
     `SELECT m.*,
       (SELECT COUNT(*) FROM likes WHERE memo_id = m.id) AS like_count,
-      (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND status='approved' AND flag='') AS comment_count
+      (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND status='approved' AND flag=''${adminView ? '' : ' AND admin_only = 0'}) AS comment_count
      FROM memos m ${where}
      ORDER BY m.pinned DESC, m.created_at DESC
      LIMIT ? OFFSET ?`
@@ -31,9 +31,9 @@ async function listMemos(env, { page = 1, tag = '', adminView = false } = {}) {
   return { memos: rows.slice(0, PAGE_SIZE), hasMore };
 }
 
-async function approvedComments(env, memoId, limit = 500) {
+async function approvedComments(env, memoId, limit = 500, adminView = false) {
   const { results } = await env.DB.prepare(
-    "SELECT id, parent_id, reply_to, name, content, created_at FROM comments WHERE memo_id = ? AND status='approved' AND flag='' ORDER BY created_at ASC LIMIT ?"
+    `SELECT id, parent_id, reply_to, name, content, created_at, admin_only FROM comments WHERE memo_id = ? AND status='approved' AND flag=''${adminView ? '' : ' AND admin_only = 0'} ORDER BY created_at ASC LIMIT ?`
   ).bind(memoId, limit).all();
   return results || [];
 }
@@ -193,7 +193,7 @@ async function homePage(env, request, url, { tag = '' } = {}) {
     Promise.all(memos.map((m) => viewUnlocked(env, request, m, settings, adminView))),
   ]);
   const commentsList = await Promise.all(
-    memos.map((m, i) => (viewOk[i] ? approvedComments(env, m.id, 500) : Promise.resolve([])))
+    memos.map((m, i) => (viewOk[i] ? approvedComments(env, m.id, 500, adminView) : Promise.resolve([])))
   );
   const cards = memos.map((m, i) =>
     memoCard(m, settings, { comments: commentsList[i], liked: liked.has(m.id), isAdmin: adminView, filesUnlocked: unlocked.has(m.id), pwLocked: !viewOk[i] })
@@ -218,7 +218,7 @@ async function memoDetail(env, request, id) {
   const memo = await env.DB.prepare(
     `SELECT m.*,
       (SELECT COUNT(*) FROM likes WHERE memo_id = m.id) AS like_count,
-      (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND status='approved' AND flag='') AS comment_count
+      (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND status='approved' AND flag=''${adminView ? '' : ' AND admin_only = 0'}) AS comment_count
      FROM memos m WHERE m.id = ?`
   ).bind(id).first();
   if (!memo || (!adminView && (memo.created_at > nowSec() || memo.hidden))) {
@@ -226,7 +226,7 @@ async function memoDetail(env, request, id) {
   }
   const url = new URL(request.url);
   const viewOk = await viewUnlocked(env, request, memo, settings, adminView);
-  const comments = viewOk ? await approvedComments(env, id, 500) : [];
+  const comments = viewOk ? await approvedComments(env, id, 500, adminView) : [];
   const liked = await likedSet(env, request, [id]);
   const unlocked = await unlockedSet(env, request, [id], adminView);
   let unlockErr = '';
@@ -341,9 +341,10 @@ async function commentPost(env, request, id) {
   if (adminReq) flag = '';
   const moderation = settings.comments_moderation !== '0';
   const status = adminReq ? 'approved' : flag ? 'pending' : moderation ? 'pending' : 'approved';
+  const adminOnly = !adminReq && form.get('admin_only') ? 1 : 0;
   await env.DB.prepare(
-    'INSERT INTO comments (memo_id, parent_id, reply_to, name, content, status, flag, ip, user_agent, geo, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)'
-  ).bind(id, parentId, replyTo, name, content, status, flag, ip, ua.slice(0, 300), geo, now).run();
+    'INSERT INTO comments (memo_id, parent_id, reply_to, name, content, status, flag, ip, user_agent, geo, admin_only, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
+  ).bind(id, parentId, replyTo, name, content, status, flag, ip, ua.slice(0, 300), geo, adminOnly, now).run();
   return redirect(`${back}?c=${flag || moderation ? 'commented_mod' : 'commented'}`);
 }
 

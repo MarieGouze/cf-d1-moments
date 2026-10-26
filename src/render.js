@@ -133,6 +133,9 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .btn-row{display:flex;align-items:center;gap:0}
 .cmt-form textarea{min-height:76px}
 .emoji-toggle{margin-left:auto;background:transparent;border:1px solid var(--line);border-radius:999px;width:26px;height:26px;font-size:14px;cursor:pointer;line-height:1;padding:0}
+.ao-check{display:flex;align-items:center;gap:4px;font-size:13px;color:var(--sub);margin-left:12px;cursor:pointer;white-space:nowrap}
+.cmt-form .ao-check input{width:auto;padding:0;margin:0}
+.ao-tag{font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:0 5px;margin-left:6px;white-space:nowrap}
 .emoji-panel{display:none;flex-wrap:wrap;gap:2px;border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:8px}
 .emoji-panel.open{display:flex}
 .emoji-panel .emo{background:none;border:0;font-size:16px;cursor:pointer;padding:2px 3px;border-radius:6px;line-height:1.2}
@@ -425,7 +428,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     const total = memo.comment_count || comments.length;
     if (comments.length || total > 0) {
       const line = (c) =>
-        `<div class="cmt-line">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${isAdmin
+        `<div class="cmt-line">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${isAdmin
           ? `<button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${c.parent_id || c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>`
           : `<a class="reply-btn" href="/memo/${memo.id}?reply=${c.parent_id || c.id}&rname=${encodeURIComponent(c.name)}#comments" title="回复" aria-label="回复"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></a>`}${delCmtBtn(c)}</div>`;
       const first = comments.slice(0, 2).map(line).join('');
@@ -446,7 +449,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       }
     }
     const row = (c, rootId) =>
-      `<div class="cmt">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}</div>`;
+      `<div class="cmt">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}</div>`;
     cmtHtml = `<div class="cmt-box">${roots
       .map((r) => row(r, r.id) + (byParent.get(r.id) || []).map((c) => `<div class="replies">${row(c, r.id)}</div>`).join(''))
       .join('')}</div>`;
@@ -466,7 +469,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
               <input name="captcha" maxlength="4" placeholder="验证码" required style="max-width:110px">`}
             </div>
             <textarea name="content" rows="3" maxlength="50" data-ph="写下你的评论（最多 50 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" placeholder="写下你的评论（最多 50 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" required></textarea>
-            <div class="btn-row"><button class="btn" type="submit">发表评论</button><button class="btn ghost" type="button" id="cancel-reply-${memo.id}" style="display:none" onclick="cancelReply(${memo.id})">取消回复</button><button class="emoji-toggle" type="button" title="插入表情" onclick="toggleEmoji(${memo.id})">😊</button></div>
+            <div class="btn-row"><button class="btn" type="submit">发表评论</button><button class="btn ghost" type="button" id="cancel-reply-${memo.id}" style="display:none" onclick="cancelReply(${memo.id})">取消回复</button>${isAdmin ? '' : `<label class="ao-check"><input type="checkbox" name="admin_only" value="1">仅管理员可见</label>`}<button class="emoji-toggle" type="button" title="插入表情" onclick="toggleEmoji(${memo.id})">😊</button></div>
             <div class="emoji-panel" id="emoji-panel-${memo.id}">${EMOJIS.map((e) => `<button type="button" class="emo" onclick="insertEmoji(${memo.id},this)">${e}</button>`).join('')}</div>
           </form>
         </div>`

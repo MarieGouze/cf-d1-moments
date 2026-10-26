@@ -11,7 +11,7 @@ The footer shows live Cloudflare usage (storage + account-wide requests). Deploy
 
 > 中文说明：[README.zh-CN.md](README.zh-CN.md)
 
-**Version 2.6.0** — numbering: feature releases bump the middle number and reset the last to 0 (2.6.x → 2.7.0); bug fixes bump the last number (2.6.0 → 2.6.1). The running version is shown in the site footer.
+**Version 2.7.0** — numbering: feature releases bump the middle number and reset the last to 0 (2.6.x → 2.7.0); bug fixes bump the last number (2.6.0 → 2.6.1). The running version is shown in the site footer.
 
 ---
 
@@ -28,7 +28,7 @@ The footer shows live Cloudflare usage (storage + account-wide requests). Deploy
 - Marquee announcement: a one-line notice set in Site settings scrolls across the top of the timeline (pauses on hover, scroll speed scales with text length); leave it empty to hide it
 - Post management: tags, pinning, scheduled publishing (future-dated posts are invisible to visitors), hidden posts (admin-only), edit/delete; deletions go to a trash bin and can be restored — permanently purging a post also deletes its orphaned uploaded files
 - Interactions: likes (IP-deduped, toggleable); comments (image captcha, replies, emoji); the home feed shows the first 2 comments per post and expands the rest in place
-- Comment governance: pre-moderation / publish-immediately switch; six anti-spam layers (honeypot field, too-fast submission, keyword list editable in admin, links in nickname, link count in body, duplicates & rate limiting) with offenders routed to a spam bin
+- Comment governance: pre-moderation / publish-immediately switch; six anti-spam layers (honeypot field, too-fast submission, keyword list editable in admin, links in nickname, link count in body, duplicates & rate limiting) with offenders routed to a spam bin; comments are capped at 50 characters; when posting, a visitor can tick "admin only" so that comment is shown only to the admin — other visitors see neither its content nor its count
 - Admin: post management, comment moderation, site settings, password change, data export (JSON), full backup (ZIP including media files) and backup restore; login brute-force protection (5 failures from one IP within 15 minutes locks it for 10 minutes)
 - Misc: dark mode via a moon/sun icon button at the header's top-right corner, icon toolbar (home / publish / logout), friend links (merged into the bottom of the feed frame), RSS (`/feed.xml`), tag pages, pagination (10 posts per page by default), a faint diagonal watermark across page whitespace, a footer line with site age (days since launch) and cumulative unique visitors
 - Performance: homepage database queries run in parallel, settings are cached in-isolate for 15s, and media responses are served through the edge cache (immutable in browsers; site assets long-lived at the edge, uploads one day, videos excluded)

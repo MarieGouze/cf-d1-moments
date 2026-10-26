@@ -2,7 +2,7 @@
 import { sha256Hex, randomToken, nowSec } from './utils.js';
 
 // 版本号（2026-10-26 用户定）：三段式 2.中.尾——增减功能递增中段、尾段归零；修 bug 只递增尾段。
-export const VERSION = '2.6.0';
+export const VERSION = '2.7.0';
 
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS memos (
@@ -109,6 +109,10 @@ export async function initDb(env) {
   }
   if (!cNames.includes('geo')) {
     await env.DB.prepare("ALTER TABLE comments ADD COLUMN geo TEXT NOT NULL DEFAULT ''").run();
+  }
+  // 迁移：comments.admin_only（评论者勾选「仅管理员可见」时为 1，前台对非管理员不显示、不计入数量）
+  if (!cNames.includes('admin_only')) {
+    await env.DB.prepare('ALTER TABLE comments ADD COLUMN admin_only INTEGER NOT NULL DEFAULT 0').run();
   }
   // 迁移：memos.hidden（隐藏动态，仅管理员可见）
   const cols = await env.DB.prepare("PRAGMA table_info(memos)").all();
