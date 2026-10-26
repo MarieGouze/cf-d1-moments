@@ -278,7 +278,7 @@ async function commentPost(env, request, id) {
   }
   const form = await request.formData();
   const name = String(form.get('name') || '').replace(/["'<>]/g, '').trim().slice(0, 20);
-  const content = String(form.get('content') || '').trim().slice(0, 500);
+  const content = String(form.get('content') || '').trim().slice(0, 50);
   if (!name || !content) return redirect(`${back}?c=empty`);
   // 回复：parent_id 必须指向同一动态下已通过的评论，reply_to 以库中昵称为准
   let parentId = 0;

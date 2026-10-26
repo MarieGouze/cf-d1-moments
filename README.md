@@ -11,6 +11,8 @@ The footer shows live Cloudflare usage (storage + account-wide requests). Deploy
 
 > 中文说明：[README.zh-CN.md](README.zh-CN.md)
 
+**Version 2.6.0** — numbering: feature releases bump the middle number and reset the last to 0 (2.6.x → 2.7.0); bug fixes bump the last number (2.6.0 → 2.6.1). The running version is shown in the site footer.
+
 ---
 
 ## Features

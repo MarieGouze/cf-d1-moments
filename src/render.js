@@ -1,7 +1,7 @@
 // 前台渲染：仿 kingwrcy/moments 的朋友圈版面（封面头图 + 头像 + 单栏时间线），样式为自研实现。
 import { escapeHtml as esc } from './markdown.js';
 import { renderContent, excerptOf } from './richtext.js';
-import { parseJsonSafe } from './db.js';
+import { parseJsonSafe, VERSION } from './db.js';
 
 export const CSS = `
 :root{
@@ -131,12 +131,11 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .cmt-more{display:inline-block;margin-top:3px;font-size:13px;color:var(--sub)}
 .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line);margin-left:8px}
 .btn-row{display:flex;align-items:center;gap:0}
-.ta-wrap{position:relative}
-.ta-wrap textarea{padding-right:42px;min-height:76px}
-.emoji-toggle{position:absolute;right:8px;bottom:8px;display:grid;place-items:center;background:transparent;border:1px solid var(--line);border-radius:999px;width:26px;height:26px;font-size:14px;cursor:pointer;line-height:1;padding:0}
+.cmt-form textarea{min-height:76px}
+.emoji-toggle{margin-left:auto;background:transparent;border:1px solid var(--line);border-radius:999px;width:26px;height:26px;font-size:14px;cursor:pointer;line-height:1;padding:0}
 .emoji-panel{display:none;flex-wrap:wrap;gap:2px;border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:8px}
 .emoji-panel.open{display:flex}
-.emoji-panel .emo{background:none;border:0;font-size:21px;cursor:pointer;padding:3px 4px;border-radius:6px;line-height:1.2}
+.emoji-panel .emo{background:none;border:0;font-size:16px;cursor:pointer;padding:2px 3px;border-radius:6px;line-height:1.2}
 .emoji-panel .emo:hover{background:var(--card)}
 .cmt-ava{width:20px;height:20px;border-radius:50%;vertical-align:-5px;margin-right:5px}
 img.cmt-ava{object-fit:cover}
@@ -466,8 +465,8 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
               ${isAdmin ? '' : `<img class="cap" src="/captcha" alt="验证码" title="点图刷新" onclick="refreshCap(this)">
               <input name="captcha" maxlength="4" placeholder="验证码" required style="max-width:110px">`}
             </div>
-            <div class="ta-wrap"><textarea name="content" rows="3" maxlength="500" data-ph="写下你的评论${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" placeholder="写下你的评论${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" required></textarea><button class="emoji-toggle" type="button" title="插入表情" onclick="toggleEmoji(${memo.id})">😊</button></div>
-            <div class="btn-row"><button class="btn" type="submit">发表评论</button><button class="btn ghost" type="button" id="cancel-reply-${memo.id}" style="display:none" onclick="cancelReply(${memo.id})">取消回复</button></div>
+            <textarea name="content" rows="3" maxlength="50" data-ph="写下你的评论（最多 50 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" placeholder="写下你的评论（最多 50 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" required></textarea>
+            <div class="btn-row"><button class="btn" type="submit">发表评论</button><button class="btn ghost" type="button" id="cancel-reply-${memo.id}" style="display:none" onclick="cancelReply(${memo.id})">取消回复</button><button class="emoji-toggle" type="button" title="插入表情" onclick="toggleEmoji(${memo.id})">😊</button></div>
             <div class="emoji-panel" id="emoji-panel-${memo.id}">${EMOJIS.map((e) => `<button type="button" class="emo" onclick="insertEmoji(${memo.id},this)">${e}</button>`).join('')}</div>
           </form>
         </div>`
@@ -549,7 +548,7 @@ export function layout(settings, { title, body, activeTag = '', adminView = fals
   </div>
  </div>
   ${body}
-  <div class="foot-note"><a class="admin-link" href="/admin" title="进入后台">${esc(settings.site_name)}</a> · 记录生活，留住瞬间<br>Powered by @TaoGe&nbsp;&nbsp;<a class="foot-gh" href="https://github.com/sandeli/cf-d1-moments" target="_blank" rel="noopener"><img class="gh-ico" src="/media/site/gh.png" alt="GitHub">cf-d1-moments</a>${(settings.site_days_text || settings.visitor_text) ? `<br>${[settings.site_days_text, settings.visitor_text].filter(Boolean).join(' · ')}` : ''}${settings.r2_usage_text ? `<br>${esc(settings.r2_usage_text)}` : ''}${settings.acct_usage_text ? `<br>${esc(settings.acct_usage_text)}` : ''}</div>
+  <div class="foot-note"><a class="admin-link" href="/admin" title="进入后台">${esc(settings.site_name)}</a> · 记录生活，留住瞬间<br>Powered by v${VERSION} @TaoGe&nbsp;&nbsp;<a class="foot-gh" href="https://github.com/sandeli/cf-d1-moments" target="_blank" rel="noopener"><img class="gh-ico" src="/media/site/gh.png" alt="GitHub">cf-d1-moments</a>${(settings.site_days_text || settings.visitor_text) ? `<br>${[settings.site_days_text, settings.visitor_text].filter(Boolean).join(' · ')}` : ''}${settings.r2_usage_text ? `<br>${esc(settings.r2_usage_text)}` : ''}${settings.acct_usage_text ? `<br>${esc(settings.acct_usage_text)}` : ''}</div>
 </div>
 <div class="lightbox" id="lightbox" onclick="closeLightbox()"><img id="lightbox-img" alt=""></div>
 <script>${JS}</script>
