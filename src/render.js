@@ -140,6 +140,8 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .tb-link{font-size:13px;color:var(--sub);text-decoration:none;padding:6px 4px;white-space:nowrap}
 .tb-link:hover{color:var(--text)}
 .tb-user{font-size:13px;color:var(--text);padding:6px 2px;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis}
+.head-box .tb-link,.head-box .tb-user{color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.55)}
+.head-box .tb-link:hover{color:#fff;text-decoration:underline}
 .emoji-panel{display:none;flex-wrap:wrap;gap:2px;border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:8px}
 .emoji-panel.open{display:flex}
 .emoji-panel .emo{background:none;border:0;font-size:16px;cursor:pointer;padding:2px 3px;border-radius:6px;line-height:1.2}
