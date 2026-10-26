@@ -3,8 +3,9 @@
 import {
   getSettings, setSetting, createSession, destroySession, isAdmin,
   sessionCookie, clearSessionCookie, parseTags, parseJsonSafe, effectiveAdminHash, gateCookie,
+  createUserSession, destroyUserSession, userCookie, clearUserCookie,
 } from './db.js';
-import { sha256Hex, randomToken, nowSec, escapeHtml as esc, htmlResponse, redirect, clientIp } from './utils.js';
+import { sha256Hex, randomToken, nowSec, escapeHtml as esc, htmlResponse, redirect, clientIp, parseCookies, verifyCaptcha } from './utils.js';
 import { renderContent, excerptOf } from './richtext.js';
 
 const ACSS = `
@@ -58,7 +59,7 @@ function page(title, body) {
 }
 
 function nav(active) {
-  return `<div class="card nav"><a href="/admin">📋 动态管理</a><a href="/admin/memos/new">✏️ 发布动态</a><a href="/admin/comments">💬 评论审核</a><a href="/admin/trash">🗑 垃圾桶</a><a href="/admin/settings">⚙️ 站点设置</a><a href="/admin/export">⬇️ 导出备份</a><a href="/admin/export-zip">📦 完整备份（含文件）</a><a href="/admin/import">📥 恢复备份</a><a href="/" target="_blank">🌐 查看站点</a><a href="/admin/logout">退出</a></div>`;
+  return `<div class="card nav"><a href="/admin">📋 动态管理</a><a href="/admin/memos/new">✏️ 发布动态</a><a href="/admin/comments">💬 评论审核</a><a href="/admin/users">👥 注册用户</a><a href="/admin/trash">🗑 垃圾桶</a><a href="/admin/settings">⚙️ 站点设置</a><a href="/admin/export">⬇️ 导出备份</a><a href="/admin/export-zip">📦 完整备份（含文件）</a><a href="/admin/import">📥 恢复备份</a><a href="/" target="_blank">🌐 查看站点</a><a href="/admin/logout">退出</a></div>`;
 }
 
 async function requireAdmin(env, request) {
@@ -330,7 +331,7 @@ export function buildExt(type, f) {
 
 function memoForm(memo, settings) {
   const isNew = !memo;
-  memo = memo || { title: '', content_md: '', tags: '', media: '[]', ext_type: '', ext_data: '{}', pinned: 0, hidden: 0, files_gated: 0, content_gated: 0, view_password_hash: '', created_at: nowSec() };
+  memo = memo || { title: '', content_md: '', tags: '', media: '[]', ext_type: '', ext_data: '{}', pinned: 0, hidden: 0, files_gated: 0, content_gated: 0, comments_members_only: 0, members_only: 0, view_password_hash: '', created_at: nowSec() };
   const ext = parseJsonSafe(memo.ext_data, {});
   const media = parseJsonSafe(memo.media, []);
   const initialHtml = memo.content_md ? renderContent(memo.content_md) : '';
@@ -421,6 +422,8 @@ function memoForm(memo, settings) {
     <label style="display:block;margin:8px 0"><input type="checkbox" name="hidden" value="1" style="width:auto" ${memo.hidden ? 'checked' : ''}> 隐藏（仅自己在登录状态下可见，游客看不到）</label>
     <label style="display:block;margin:8px 0"><input type="checkbox" name="files_gated" value="1" style="width:auto" ${memo.files_gated ? 'checked' : ''}> 附件文件回复后可见（游客在这条动态下评论后，才能看到下载文件；图片、视频不受影响）</label>
     <label style="display:block;margin:8px 0"><input type="checkbox" name="content_gated" value="1" style="width:auto" ${memo.content_gated ? 'checked' : ''}> 正文回复后可见（游客评论后才能看正文、图片和附件；标题照常显示，勾了这个就不必再勾上一项）</label>
+    <label style="display:block;margin:8px 0"><input type="checkbox" name="comments_members_only" value="1" style="width:auto" ${memo.comments_members_only ? 'checked' : ''}> 仅注册用户可评论（游客在这条下只能看，登录/注册后才能评论）</label>
+    <label style="display:block;margin:8px 0"><input type="checkbox" name="members_only" value="1" style="width:auto" ${memo.members_only ? 'checked' : ''}> 仅注册用户可见（游客看不到这条的正文和评论，只会看到登录/注册提示；比上一项更严格，勾了这个就不必再勾上一项）</label>
     <label>观看密码（可选${memo.view_password_hash ? '，已设置' : ''}；留空 = ${memo.view_password_hash ? '不修改' : '不设密码'}；设了后访客输对密码才能看这条的正文、图片、附件与评论，输对一次 30 天免输）</label>
     <input type="password" name="view_password" autocomplete="new-password" placeholder="至少 4 位">
     ${memo.view_password_hash ? '<label style="display:block;margin:8px 0"><input type="checkbox" name="view_password_clear" value="1" style="width:auto"> 清除观看密码（取消这条的密码保护）</label>' : ''}
@@ -608,6 +611,8 @@ export async function memoSave(env, request, id) {
   const hiddenPost = f.get('hidden') ? 1 : 0;
   const filesGated = f.get('files_gated') ? 1 : 0;
   const contentGated = f.get('content_gated') ? 1 : 0;
+  const membersOnly = f.get('comments_members_only') ? 1 : 0;
+  const viewMembersOnly = f.get('members_only') ? 1 : 0;
   const now = nowSec();
   if (!content && parseJsonSafe(media, []).length === 0 && !ext.type) {
     return page('内容为空', `<div class="card"><div class="err">文字、图片、附加内容至少要有一项。</div><a href="/admin">← 返回</a></div>`);
@@ -631,13 +636,13 @@ export async function memoSave(env, request, id) {
     if (!old) return redirect('/admin');
     const created = fromLocalInput(String(f.get('created_at') || ''), old.created_at);
     await env.DB.prepare(
-      'UPDATE memos SET title=?, content_md=?, tags=?, media=?, ext_type=?, ext_data=?, pinned=?, hidden=?, files_gated=?, content_gated=?, view_password_hash=?, created_at=?, updated_at=? WHERE id=?'
-    ).bind(title, content, tags, media, ext.type, JSON.stringify(ext.data), pinned, hiddenPost, filesGated, contentGated, viewPwHash, created, now, id).run();
+      'UPDATE memos SET title=?, content_md=?, tags=?, media=?, ext_type=?, ext_data=?, pinned=?, hidden=?, files_gated=?, content_gated=?, comments_members_only=?, members_only=?, view_password_hash=?, created_at=?, updated_at=? WHERE id=?'
+    ).bind(title, content, tags, media, ext.type, JSON.stringify(ext.data), pinned, hiddenPost, filesGated, contentGated, membersOnly, viewMembersOnly, viewPwHash, created, now, id).run();
   } else {
     const created = fromLocalInput(String(f.get('created_at') || ''), now);
     await env.DB.prepare(
-      'INSERT INTO memos (title, content_md, tags, media, ext_type, ext_data, pinned, hidden, files_gated, content_gated, view_password_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
-    ).bind(title, content, tags, media, ext.type, JSON.stringify(ext.data), pinned, hiddenPost, filesGated, contentGated, viewPwHash, created, now).run();
+      'INSERT INTO memos (title, content_md, tags, media, ext_type, ext_data, pinned, hidden, files_gated, content_gated, comments_members_only, members_only, view_password_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    ).bind(title, content, tags, media, ext.type, JSON.stringify(ext.data), pinned, hiddenPost, filesGated, contentGated, membersOnly, viewMembersOnly, viewPwHash, created, now).run();
   }
   return redirect('/admin');
 }
@@ -820,6 +825,161 @@ export async function trashAction(env, id, action) {
   return redirect('/admin/trash?restored=1');
 }
 
+// ---------------- 注册用户（前台注册 / 登录 / 退出） ----------------
+// 注册带图形验证码；用户名 2~16 字、不能带链接；同 IP 每天最多注册 5 个账号。
+// 密码哈希 = sha256(用户名:密码)，用户名唯一即天然加盐。登录失败按 IP 锁定（ulog: 前缀）。
+
+function userHash(username, pw) {
+  return sha256Hex(username + ':' + pw);
+}
+
+export async function userRegisterPage(env, url) {
+  const s = await getSettings(env);
+  if (s.registration_open !== '1') {
+    return page('注册已关闭', `<div class="card"><h1>注册已关闭</h1><p class="hint">站长暂未开放注册。</p><a href="/">← 回首页</a></div>`);
+  }
+  const err = url.searchParams.get('e');
+  const next = safeNext(url.searchParams.get('next'));
+  const errs = { captcha: '验证码不对，请重新填写。', name: '用户名要 2~16 个字，且不能带链接等内容。', taken: '这个用户名已经被注册了，换一个试试。', pw: '密码至少 6 位，且两次输入要一致。', many: '同一网络今天注册的账号太多了，请明天再试。' };
+  return page('注册', `<div class="card"><h1>📝 注册账号</h1>
+    ${err && errs[err] ? `<div class="err">${errs[err]}</div>` : ''}
+    <form method="post" action="/register">
+      <input type="hidden" name="next" value="${esc(next)}">
+      <label>用户名（2~16 个字，注册后评论会显示这个名字）</label><input name="username" maxlength="16" required autocomplete="username">
+      <label>密码（至少 6 位）</label><input name="password" type="password" required minlength="6" autocomplete="new-password">
+      <label>再输一遍密码</label><input name="password2" type="password" required minlength="6" autocomplete="new-password">
+      <label>验证码</label>
+      <div style="display:flex;gap:8px;align-items:flex-start"><img src="/captcha" alt="验证码" title="点图刷新" onclick="this.src='/captcha?t='+Date.now()" style="height:40px;border-radius:6px;cursor:pointer;border:1px solid #ddd"><input name="captcha" maxlength="4" required style="max-width:120px" placeholder="输入图中数字"></div>
+      <button class="btn" type="submit">注册并登录</button>
+    </form>
+    <p class="hint" style="margin-top:12px">已有账号？<a href="/login?next=${encodeURIComponent(next)}">去登录</a></p></div>`);
+}
+
+export async function userRegisterPost(env, request) {
+  const s = await getSettings(env);
+  const form = await request.formData();
+  const next = safeNext(form.get('next'));
+  const back = (e) => redirect(`/register?e=${e}&next=${encodeURIComponent(next)}`);
+  if (s.registration_open !== '1') return redirect('/');
+  const cookies = parseCookies(request);
+  if (!(await verifyCaptcha(s.site_secret, cookies.mm_captcha, form.get('captcha')))) return back('captcha');
+  const username = String(form.get('username') || '').replace(/["'<>]/g, '').trim();
+  if (username.length < 2 || username.length > 16 || /https?:|www\.|\.com|\.cn|\.net/i.test(username)) return back('name');
+  if (username === String(s.nickname || '').trim()) return back('taken');
+  const pw = String(form.get('password') || '');
+  const pw2 = String(form.get('password2') || '');
+  if (pw.length < 6 || pw.length > 64 || pw !== pw2) return back('pw');
+  const ip = clientIp(request);
+  const now = nowSec();
+  const cnt = await env.DB.prepare('SELECT COUNT(*) AS c FROM users WHERE reg_ip = ? AND created_at > ?').bind(ip, now - 86400).first();
+  if (cnt && cnt.c >= 5) return back('many');
+  const dup = await env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(username).first();
+  if (dup) return back('taken');
+  const cf = request.cf || {};
+  const geo = JSON.stringify({ country: cf.country || '', region: cf.region || '', city: cf.city || '' });
+  const ua = (request.headers.get('User-Agent') || '').slice(0, 300);
+  const ins = await env.DB.prepare('INSERT INTO users (username, password_hash, reg_ip, created_at, last_login_at, last_ip, last_geo, last_ua) VALUES (?,?,?,?,?,?,?,?)')
+    .bind(username, await userHash(username, pw), ip, now, now, ip, geo, ua).run();
+  const token = await createUserSession(env, ins.meta.last_row_id);
+  return redirect(next, { 'Set-Cookie': userCookie(token) });
+}
+
+export async function userLoginPage(env, url) {
+  const err = url.searchParams.get('e');
+  const next = safeNext(url.searchParams.get('next'));
+  const errs = { bad: '用户名或密码不对。', locked: '试错太多，这个网络已被临时锁定，请 10 分钟后再试。', disabled: '这个账号已被禁用，请联系站长。' };
+  return page('登录', `<div class="card"><h1>🔑 登录</h1>
+    ${err && errs[err] ? `<div class="err">${errs[err]}</div>` : ''}
+    <form method="post" action="/login">
+      <input type="hidden" name="next" value="${esc(next)}">
+      <label>用户名</label><input name="username" required autocomplete="username">
+      <label>密码</label><input name="password" type="password" required autocomplete="current-password">
+      <button class="btn" type="submit">登录</button>
+    </form>
+    <p class="hint" style="margin-top:12px">还没有账号？<a href="/register?next=${encodeURIComponent(next)}">去注册</a> · <a href="/">回首页</a></p></div>`);
+}
+
+export async function userLoginPost(env, request) {
+  const form = await request.formData();
+  const next = safeNext(form.get('next'));
+  const back = (e) => redirect(`/login?e=${e}&next=${encodeURIComponent(next)}`);
+  const ip = request.headers.get('CF-Connecting-IP') || 'local';
+  const now = nowSec();
+  const rec = await getLock(env, ip, 'ulog:');
+  if (rec.u && rec.u > now) return back('locked');
+  const username = String(form.get('username') || '').trim();
+  const pw = String(form.get('password') || '');
+  const u = await env.DB.prepare('SELECT id, username, password_hash, status FROM users WHERE username = ?').bind(username).first();
+  if (u && u.status) return back('disabled');
+  if (!u || u.password_hash !== (await userHash(username, pw))) {
+    const nx = now - (rec.w || 0) > 900 ? { n: 0, w: now, u: 0 } : rec;
+    nx.n = (nx.n || 0) + 1;
+    if (!nx.w) nx.w = now;
+    if (nx.n >= 5) nx.u = now + 600;
+    await setLock(env, ip, nx, 'ulog:');
+    return back(nx.u && nx.u > now ? 'locked' : 'bad');
+  }
+  await clearLock(env, ip, 'ulog:');
+  const cf = request.cf || {};
+  const geo = JSON.stringify({ country: cf.country || '', region: cf.region || '', city: cf.city || '' });
+  const ua = (request.headers.get('User-Agent') || '').slice(0, 300);
+  await env.DB.prepare('UPDATE users SET last_login_at = ?, last_ip = ?, last_geo = ?, last_ua = ? WHERE id = ?')
+    .bind(now, ip, geo, ua, u.id).run();
+  const token = await createUserSession(env, u.id);
+  return redirect(next, { 'Set-Cookie': userCookie(token) });
+}
+
+export async function userLogout(env, request) {
+  await destroyUserSession(env, request);
+  return redirect('/', { 'Set-Cookie': clearUserCookie });
+}
+
+// ---------------- 注册用户管理（后台） ----------------
+
+function deviceOf(ua) {
+  const s = String(ua || '');
+  if (/iPad|Tablet|PlayBook/i.test(s)) return '平板';
+  if (/Mobi|Android|iPhone|iPod|Windows Phone/i.test(s)) return '手机';
+  if (!s) return '—';
+  return '电脑';
+}
+
+export async function usersPage(env) {
+  const { results } = await env.DB.prepare('SELECT id, username, reg_ip, status, created_at, last_login_at, last_ip, last_geo, last_ua FROM users ORDER BY id DESC LIMIT 200').all();
+  const fmt = (ts) => ts ? new Date((ts + 28800) * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—';
+  const rows = (results || []).map((u) => `<tr>
+      <td><b>${esc(u.username)}</b> <span class="hint">#${u.id}</span>${u.status ? ' <span class="hint" style="color:#e5484d">（已禁用）</span>' : ''}<div class="hint">注册 IP ${esc(u.reg_ip || '—')}</div></td>
+      <td style="white-space:nowrap">${fmt(u.created_at)}</td>
+      <td style="white-space:nowrap">${fmt(u.last_login_at)}</td>
+      <td>${u.last_ua ? `<span title="${esc(u.last_ua)}">${esc(deviceOf(u.last_ua))} · ${esc(parseUa(u.last_ua))}</span>` : '—'}</td>
+      <td>${esc(u.last_ip || '—')}</td>
+      <td>${esc(geoText(u.last_geo) || '—')}</td>
+      <td style="white-space:nowrap">
+        ${u.status
+          ? `<form method="post" action="/admin/users/${u.id}/enable" style="display:inline"><button class="btn" style="padding:4px 10px">启用</button></form>`
+          : `<form method="post" action="/admin/users/${u.id}/disable" style="display:inline" onsubmit="return confirm('确定禁用用户「${esc(u.username)}」？他将立刻被退出登录且无法再登录（评论保留，可随时启用恢复）。')"><button class="btn ghost" style="padding:4px 10px">禁用</button></form>`}
+        <form method="post" action="/admin/users/${u.id}/delete" style="display:inline" onsubmit="return confirm('确定删除用户「${esc(u.username)}」？其登录会话会一并失效（已发出的评论会保留，名字不变）。')"><button class="btn ghost" style="padding:4px 10px">删除</button></form>
+      </td>
+    </tr>`).join('');
+  return page('后台 · 注册用户', `${nav()}
+    <div class="card"><h2>👥 注册用户（共 ${(results || []).length} 人）</h2>
+    <p class="hint">「最后登录」一列记录的是该用户最近一次登录/注册时的设备、系统、IP 与大致地址（来自接入网络，可能不精确）。禁用后立即失效且不能登录，启用即恢复；删除只删账号与会话，不删除他发过的评论。开放/关闭注册在「站点设置」里。</p>
+    ${rows ? `<table><tr><th>用户</th><th>注册时间</th><th>最后登录</th><th>设备 · 系统</th><th>IP</th><th>地址</th><th></th></tr>${rows}</table>` : '<p class="hint">还没有注册用户。</p>'}
+    </div>`);
+}
+
+export async function userSetStatus(env, request, id, status) {
+  await env.DB.prepare('UPDATE users SET status = ? WHERE id = ?').bind(status, id).run();
+  if (status) await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id).run();
+  return redirect('/admin/users');
+}
+
+export async function userDelete(env, request, id) {
+  await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id).run();
+  await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id).run();
+  return redirect('/admin/users');
+}
+
 // ---------------- 评论审核 ----------------
 
 // 把 User-Agent 原文解析成「浏览器 · 操作系统」的可读文字（悬停可看原文）
@@ -937,6 +1097,7 @@ export async function settingsPage(env, url) {
       ${s.cover_url ? `<img class="upl-prev wide" src="${esc(s.cover_url)}" alt="">` : ''}
       <div class="upl-row"><input name="cover_url" value="${esc(s.cover_url)}" placeholder="/media/… 或 https://…"><label class="btn upl-btn">上传替换<input type="file" accept="image/*" data-for="cover_url" hidden></label></div>
       <label style="display:block;margin:8px 0"><input type="checkbox" name="comments_enabled" value="1" style="width:auto" ${s.comments_enabled === '1' ? 'checked' : ''}> 开启评论</label>
+      <label style="display:block;margin:8px 0"><input type="checkbox" name="registration_open" value="1" style="width:auto" ${s.registration_open === '1' ? 'checked' : ''}> 开放游客注册（注册后可用自己的用户名评论；已注册用户在「注册用户」页管理）</label>
       <label>评论是否审核</label>
       <select name="comments_moderation">
         <option value="1" ${s.comments_moderation !== '0' ? 'selected' : ''}>先审后显（评论要后台点通过才显示）</option>
@@ -1013,6 +1174,7 @@ export async function settingsSave(env, request) {
   await setSetting(env, 'avatar_url', f.get('avatar_url'));
   await setSetting(env, 'cover_url', f.get('cover_url'));
   await setSetting(env, 'comments_enabled', f.get('comments_enabled') ? '1' : '0');
+  await setSetting(env, 'registration_open', f.get('registration_open') ? '1' : '0');
   await setSetting(env, 'comments_moderation', f.get('comments_moderation') === '0' ? '0' : '1');
   await setSetting(env, 'spam_keywords', String(f.get('spam_keywords') || '').slice(0, 2000));
   await setSetting(env, 'links', JSON.stringify(links));
@@ -1304,7 +1466,7 @@ async function restoreFromData(env, data, mediaFiles) {
   }
   for (const row of data.settings || []) {
     if (!row.key || PROTECTED_SETTING_KEYS.has(row.key)) continue;
-    if (/^(acct_usage|r2_usage|reqcnt:|llock:)/.test(row.key)) continue;
+    if (/^(acct_usage|r2_usage|reqcnt:|llock:|glock:|ulog:)/.test(row.key)) continue;
     await setSetting(env, row.key, row.value);
   }
   return {

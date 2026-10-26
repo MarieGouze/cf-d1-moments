@@ -137,6 +137,9 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .cmt-form .ao-check input{width:auto;padding:0;margin:0}
 .ao-tag{font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:0 5px;margin-left:6px;white-space:nowrap}
 .ao-hidden{color:#d97706;font-weight:600}
+.tb-link{font-size:13px;color:var(--sub);text-decoration:none;padding:6px 4px;white-space:nowrap}
+.tb-link:hover{color:var(--text)}
+.tb-user{font-size:13px;color:var(--text);padding:6px 2px;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis}
 .emoji-panel{display:none;flex-wrap:wrap;gap:2px;border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:8px}
 .emoji-panel.open{display:flex}
 .emoji-panel .emo{background:none;border:0;font-size:16px;cursor:pointer;padding:2px 3px;border-radius:6px;line-height:1.2}
@@ -405,7 +408,7 @@ function contentHtml(memo, detail) {
   return renderContent(memo.content_md);
 }
 
-export function memoCard(memo, settings, { comments = [], liked = false, detail = false, isAdmin = false, filesUnlocked = false, pwLocked = false, unlockErr = '' } = {}) {
+export function memoCard(memo, settings, { comments = [], liked = false, detail = false, isAdmin = false, user = null, filesUnlocked = false, pwLocked = false, membersLocked = false, unlockErr = '' } = {}) {
   const media = parseJsonSafe(memo.media, []);
   const tags = String(memo.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
   const avatarStyle = settings.avatar_url
@@ -465,20 +468,29 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       .map((r) => row(r, r.id) + (byParent.get(r.id) || []).map((c) => `<div class="replies">${row(c, r.id)}</div>`).join(''))
       .join('')}</div>`;
   }
-  if (pwLocked) cmtHtml = '';
+  const locked = pwLocked || membersLocked;
+  if (locked) cmtHtml = '';
+  const membersOnly = memo.comments_members_only && !isAdmin && !user;
+  const identityHtml = isAdmin
+    ? ''
+    : user
+      ? `<div class="hint" style="margin-bottom:8px">以注册用户「${esc(user.username)}」的身份评论</div>`
+      : `<div class="hint" style="margin-bottom:8px">以游客身份评论，昵称随机显示为「游客XXX」，只需填验证码 · <a href="/login">登录</a>${settings.registration_open === '1' ? ' / <a href="/register">注册</a>' : ''}</div>`;
+  const capRow = isAdmin || user
+    ? ''
+    : `<div class="row"><img class="cap" alt="验证码" title="点图刷新" onclick="refreshCap(this)">
+              <input name="captcha" maxlength="4" placeholder="验证码" required style="max-width:110px"></div>`;
   const cmtForm =
-    !pwLocked && settings.comments_enabled === '1'
-      ? `<div class="cmt-form" id="cmt-form-${memo.id}">
+    !locked && settings.comments_enabled === '1'
+      ? membersOnly
+        ? `<div class="cmt-form" id="cmt-form-${memo.id}"><div class="files-gated" style="margin:4px 0">🔒 本动态仅注册用户可评论，<a href="/login?next=/memo/${memo.id}">登录</a>${settings.registration_open === '1' ? ` 或 <a href="/register?next=/memo/${memo.id}">注册</a>` : ''}后即可评论</div></div>`
+        : `<div class="cmt-form" id="cmt-form-${memo.id}">
           <form method="post" action="/memo/${memo.id}/comment">
             <input type="text" name="website" tabindex="-1" autocomplete="off" style="display:none" aria-hidden="true">
             <input type="hidden" name="ft" value="${Math.floor(Date.now() / 1000)}">
             <input type="hidden" name="parent_id" value="0">
             <input type="hidden" name="reply_to" value="">
-            <div class="row">
-              <input name="name" maxlength="20" placeholder="你的昵称" value="${isAdmin ? esc(settings.nickname || '') : ''}" required>
-              ${isAdmin ? '' : `<img class="cap" alt="验证码" title="点图刷新" onclick="refreshCap(this)">
-              <input name="captcha" maxlength="4" placeholder="验证码" required style="max-width:110px">`}
-            </div>
+            ${identityHtml}${capRow}
             <textarea name="content" rows="3" maxlength="50" data-ph="写下你的评论（最多 50 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" placeholder="写下你的评论（最多 50 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" required></textarea>
             <div class="btn-row"><button class="btn" type="submit">发表评论</button><button class="btn ghost" type="button" id="cancel-reply-${memo.id}" style="display:none" onclick="cancelReply(${memo.id})">取消回复</button>${isAdmin ? '' : `<label class="ao-check"><input type="checkbox" name="admin_only" value="1">仅管理员可见</label>`}<button class="emoji-toggle" type="button" title="插入表情" onclick="toggleEmoji(${memo.id})">😊</button></div>
             <div class="emoji-panel" id="emoji-panel-${memo.id}">${EMOJIS.map((e) => `<button type="button" class="emo" onclick="insertEmoji(${memo.id},this)">${e}</button>`).join('')}</div>
@@ -489,12 +501,14 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     <div class="memo-head">
       <div class="${avatarCls}" ${avatarStyle}>${avatarInner}</div>
       <div>
-        <div class="m-nick">${esc(settings.nickname)}${memo.pinned ? '<span class="pin">📌 置顶</span>' : ''}${memo.hidden && isAdmin ? '<span class="pin" style="color:#999">🔒 隐藏</span>' : ''}${memo.view_password_hash && isAdmin ? '<span class="pin">🔑 密码</span>' : ''}</div>
+        <div class="m-nick">${esc(settings.nickname)}${memo.pinned ? '<span class="pin">📌 置顶</span>' : ''}${memo.hidden && isAdmin ? '<span class="pin" style="color:#999">🔒 隐藏</span>' : ''}${memo.view_password_hash && isAdmin ? '<span class="pin">🔑 密码</span>' : ''}${memo.members_only && isAdmin ? '<span class="pin">👥 仅注册用户</span>' : ''}</div>
       </div>
     </div>
     <div class="m-body">
       ${memo.title ? `<div class="m-title">${esc(memo.title)}</div>` : ''}
-      ${pwLocked
+      ${membersLocked
+        ? `<div class="files-gated">🔒 本动态仅注册用户可见，<a href="/login?next=/memo/${memo.id}">登录</a>${settings.registration_open === '1' ? ` 或 <a href="/register?next=/memo/${memo.id}">注册</a>` : ''}后即可查看</div>`
+        : pwLocked
         ? `<div class="files-gated">🔒 此动态已设密码保护${detail ? '' : `，<a href="/memo/${memo.id}">输入密码查看 →</a>`}</div>${detail ? `${unlockErr ? `<div style="color:#e5484d;margin-top:8px;font-size:14px">${unlockErr}</div>` : ''}<form method="post" action="/memo/${memo.id}/unlock" style="margin-top:8px;display:flex;gap:8px"><input type="password" name="password" placeholder="输入观看密码" required style="flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text)"><button class="btn" type="submit">查看</button></form>` : ''}`
         : (memo.content_gated && !filesUnlocked)
         ? `<div class="files-gated">🔒 本动态内容需回复后可见，<a href="${detail ? '#comments' : `/memo/${memo.id}#comments`}">评论后即可查看</a></div>`
@@ -512,7 +526,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       ${isAdmin ? `<a class="act" href="/admin/memos/${memo.id}/edit" style="text-decoration:none">✏️ 编辑</a>` : ''}
       ${isAdmin ? `<form method="post" action="/admin/memos/${memo.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条动态？评论和点赞会一并移入垃圾桶。')"><button class="act" type="submit" style="color:#e5484d">&#x1F5D1;&#xFE0E; 删除</button></form>` : ''}
       <span class="spacer"></span>
-      ${pwLocked ? '' : `<button class="act${liked ? ' liked' : ''}" onclick="likeMemo(${memo.id},this)">❤ <span class="lc">${memo.like_count || 0}</span></button>
+      ${locked ? '' : `<button class="act${liked ? ' liked' : ''}" onclick="likeMemo(${memo.id},this)">❤ <span class="lc">${memo.like_count || 0}</span></button>
       ${(detail || isAdmin)
         ? `<button class="act" type="button" title="评论" onclick="toggleCmt(${memo.id})">💬 ${memo.comment_count || 0}</button>`
         : `<button class="act" type="button" title="评论" onclick="toggleCmt(${memo.id})">💬 ${memo.comment_count || 0}</button>`}`}
@@ -521,7 +535,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
   </article>`;
 }
 
-export function layout(settings, { title, body, activeTag = '', adminView = false }) {
+export function layout(settings, { title, body, activeTag = '', adminView = false, user = null }) {
   const coverStyle = settings.cover_url
     ? `style="background-image:url('${esc(settings.cover_url)}')"`
     : '';
@@ -557,6 +571,9 @@ export function layout(settings, { title, body, activeTag = '', adminView = fals
     <a class="tb-btn${!activeTag ? ' on' : ''}" href="/" title="首页" aria-label="首页"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></a>
     <span id="tag-chips"></span>
     <span class="spacer"></span>
+    ${!adminView ? (user
+      ? `<span class="tb-user">👤 ${esc(user.username)}</span><a class="tb-link" href="/logout">退出</a>`
+      : `<a class="tb-link" href="/login">登录</a>${settings.registration_open === '1' ? '<a class="tb-link" href="/register">注册</a>' : ''}`) : ''}
     ${adminView ? '<a class="tb-btn" href="/admin/memos/new" title="发布" aria-label="发布"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></a><a class="tb-btn" href="/admin/logout" title="退出" aria-label="退出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12v.01"/><path d="M13 4.6v15.6a1 1 0 0 1-1.2 1L5 20V5.6a2 2 0 0 1 1.5-1.9l4-1A2 2 0 0 1 13 4.6Z"/></svg></a>' : ''}
   </div>
   </div>
@@ -602,6 +619,8 @@ export function noticeHtml(code) {
     captcha: '验证码不对，请重新填写。',
     closed: '评论功能已关闭。',
     empty: '内容不能为空。',
+    members: '本动态仅注册用户可评论，请先登录或注册。',
+    membersview: '本动态仅注册用户可见，请先登录或注册。',
   };
   return code && map[code] ? `<div class="notice">${map[code]}</div>` : '';
 }

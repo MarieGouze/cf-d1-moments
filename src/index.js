@@ -1,5 +1,5 @@
 // cf-d1-moments：极简朋友圈（仿 kingwrcy/moments 版面，Cloudflare Workers + D1 + R2 重写）
-import { initDb, getSettings, isAdmin, gateCookieOk } from './db.js';
+import { initDb, getSettings, isAdmin, gateCookieOk, currentUser } from './db.js';
 import { layout, memoCard, tagChipsScript, linksBlock, pagerHtml, noticeHtml, timeAgo } from './render.js';
 import * as admin from './admin.js';
 import {
@@ -181,7 +181,7 @@ async function viewUnlocked(env, request, memo, settings, adminView) {
 }
 
 async function homePage(env, request, url, { tag = '' } = {}) {
-  const [settings, adminView] = await Promise.all([getSettings(env), isAdmin(env, request)]);
+  const [settings, adminView, user] = await Promise.all([getSettings(env), isAdmin(env, request), currentUser(env, request)]);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1);
   const { memos, hasMore } = await listMemos(env, { page, tag, adminView });
   // 点赞/解锁/标签/每条动态的评论原本逐个串行查（一页 10 条就是十几趟），改为全部并行
@@ -192,11 +192,12 @@ async function homePage(env, request, url, { tag = '' } = {}) {
     allTags(env, adminView),
     Promise.all(memos.map((m) => viewUnlocked(env, request, m, settings, adminView))),
   ]);
+  const mLocked = memos.map((m) => !!(m.members_only && !adminView && !user));
   const commentsList = await Promise.all(
-    memos.map((m, i) => (viewOk[i] ? approvedComments(env, m.id, 500, adminView) : Promise.resolve([])))
+    memos.map((m, i) => (viewOk[i] && !mLocked[i] ? approvedComments(env, m.id, 500, adminView) : Promise.resolve([])))
   );
   const cards = memos.map((m, i) =>
-    memoCard(m, settings, { comments: commentsList[i], liked: liked.has(m.id), isAdmin: adminView, filesUnlocked: unlocked.has(m.id), pwLocked: !viewOk[i] })
+    memoCard(m, settings, { comments: commentsList[i], liked: liked.has(m.id), isAdmin: adminView, user, filesUnlocked: unlocked.has(m.id), pwLocked: !viewOk[i], membersLocked: mLocked[i] })
   );
   const base = tag ? `/tag/${encodeURIComponent(tag)}` : '/';
   const announce = (settings.announce_text || '').trim();
@@ -209,12 +210,13 @@ async function homePage(env, request, url, { tag = '' } = {}) {
     <div class="feed-box">${mq}${cards.join('<div class="memo-sep"></div>') || '<div class="memo">还没有动态。</div>'}${linksBlock(settings)}</div>
     ${pagerHtml(page, hasMore, base)}
     ${tagChipsScript(tags, tag)}`;
-  return htmlResponse(layout(await withUsage(env, settings), { title: tag ? `#${tag} · ${settings.site_name}` : settings.site_name, body, activeTag: tag, adminView }));
+  return htmlResponse(layout(await withUsage(env, settings), { title: tag ? `#${tag} · ${settings.site_name}` : settings.site_name, body, activeTag: tag, adminView, user }));
 }
 
 async function memoDetail(env, request, id) {
   const settings = await getSettings(env);
   const adminView = await isAdmin(env, request);
+  const user = await currentUser(env, request);
   const memo = await env.DB.prepare(
     `SELECT m.*,
       (SELECT COUNT(*) FROM likes WHERE memo_id = m.id) AS like_count,
@@ -226,7 +228,8 @@ async function memoDetail(env, request, id) {
   }
   const url = new URL(request.url);
   const viewOk = await viewUnlocked(env, request, memo, settings, adminView);
-  const comments = viewOk ? await approvedComments(env, id, 500, adminView) : [];
+  const membersLocked = !!(memo.members_only && !adminView && !user);
+  const comments = viewOk && !membersLocked ? await approvedComments(env, id, 500, adminView) : [];
   const liked = await likedSet(env, request, [id]);
   const unlocked = await unlockedSet(env, request, [id], adminView);
   let unlockErr = '';
@@ -238,15 +241,18 @@ async function memoDetail(env, request, id) {
       unlockErr = `密码不对，请重试。${n ? `（已错 ${escapeXml(n)} 次，错满 5 次将暂停 10 分钟）` : ''}`;
     }
   }
-  const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, filesUnlocked: unlocked.has(id), pwLocked: !viewOk, unlockErr })}</div>
+  const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, user, filesUnlocked: unlocked.has(id), pwLocked: !viewOk, membersLocked, unlockErr })}</div>
     <div class="pager"><a href="/">← 回到时间线</a></div>`;
-  const pageTitle = memo.title || (viewOk ? plainTextExcerpt(memo.content_md, 40) : '') || settings.site_name;
-  return htmlResponse(layout(await withUsage(env, settings), { title: `${pageTitle} · ${settings.site_name}`, body, adminView }));
+  const pageTitle = memo.title || (viewOk && !membersLocked ? plainTextExcerpt(memo.content_md, 40) : '') || settings.site_name;
+  return htmlResponse(layout(await withUsage(env, settings), { title: `${pageTitle} · ${settings.site_name}`, body, adminView, user }));
 }
 
 async function likePost(env, request, id) {
-  const memo = await env.DB.prepare('SELECT id, view_password_hash FROM memos WHERE id = ?').bind(id).first();
+  const memo = await env.DB.prepare('SELECT id, view_password_hash, members_only FROM memos WHERE id = ?').bind(id).first();
   if (!memo) return Response.json({ error: 'not found' }, { status: 404 });
+  if (memo.members_only && !(await isAdmin(env, request)) && !(await currentUser(env, request))) {
+    return Response.json({ error: 'members' }, { status: 403 });
+  }
   if (memo.view_password_hash) {
     const settings = await getSettings(env);
     if (!(await viewUnlocked(env, request, memo, settings, await isAdmin(env, request)))) {
@@ -271,15 +277,26 @@ async function commentPost(env, request, id) {
   const settings = await getSettings(env);
   const back = `/memo/${id}`;
   if (settings.comments_enabled !== '1') return redirect(`${back}?c=closed`);
-  const memo = await env.DB.prepare('SELECT id, view_password_hash FROM memos WHERE id = ?').bind(id).first();
+  const memo = await env.DB.prepare('SELECT id, view_password_hash, comments_members_only, members_only FROM memos WHERE id = ?').bind(id).first();
   if (!memo) return redirect('/');
-  if (memo.view_password_hash && !(await viewUnlocked(env, request, memo, settings, await isAdmin(env, request)))) {
+  const adminReq = await isAdmin(env, request);
+  if (memo.members_only && !adminReq && !(await currentUser(env, request))) {
+    return redirect(`${back}?c=membersview`);
+  }
+  if (memo.view_password_hash && !(await viewUnlocked(env, request, memo, settings, adminReq))) {
     return redirect(back);
   }
+  // 身份：管理员用站长昵称；登录的注册用户用其用户名（免验证码）；游客不填昵称、系统随机给「游客XXX」（只验验证码）
+  const user = adminReq ? null : await currentUser(env, request);
+  if (memo.comments_members_only && !adminReq && !user) return redirect(`${back}?c=members`);
   const form = await request.formData();
-  const name = String(form.get('name') || '').replace(/["'<>]/g, '').trim().slice(0, 20);
+  const name = adminReq
+    ? String(settings.nickname || '主人').slice(0, 20)
+    : user
+      ? user.username
+      : `游客${100 + Math.floor(Math.random() * 900)}`;
   const content = String(form.get('content') || '').trim().slice(0, 50);
-  if (!name || !content) return redirect(`${back}?c=empty`);
+  if (!content) return redirect(`${back}?c=empty`);
   // 回复：parent_id 必须指向同一动态下已通过的评论，reply_to 以库中昵称为准
   let parentId = 0;
   let replyTo = '';
@@ -293,9 +310,8 @@ async function commentPost(env, request, id) {
       replyTo = p.name;
     }
   }
-  // 管理员本人评论：免验证码、免防垃圾判定、直接通过
-  const adminReq = await isAdmin(env, request);
-  if (!adminReq) {
+  // 管理员与注册用户免验证码；游客只验图形验证码
+  if (!adminReq && !user) {
     const cookies = parseCookies(request);
     const okCap = await verifyCaptcha(settings.site_secret, cookies.mm_captcha, form.get('captcha'));
     if (!okCap) return redirect(`${back}?c=captcha`);
@@ -353,8 +369,8 @@ async function feed(env) {
   const { memos } = await listMemos(env, { page: 1 });
   const items = memos
     .map((m) => {
-      const text = m.title || (m.view_password_hash ? '（密码保护）' : m.content_gated ? '（回复后可见）' : plainTextExcerpt(m.content_md, 120) || '（图片动态）');
-      const desc = m.view_password_hash ? '本动态已设密码保护，请到网站输入密码查看' : m.content_gated ? '本动态内容需回复后可见' : plainTextExcerpt(m.content_md, 300);
+      const text = m.title || (m.members_only ? '（仅注册用户可见）' : m.view_password_hash ? '（密码保护）' : m.content_gated ? '（回复后可见）' : plainTextExcerpt(m.content_md, 120) || '（图片动态）');
+      const desc = m.members_only ? '本动态仅注册用户可见，请登录网站查看' : m.view_password_hash ? '本动态已设密码保护，请到网站输入密码查看' : m.content_gated ? '本动态内容需回复后可见' : plainTextExcerpt(m.content_md, 300);
       return `<item><title>${escapeXml(text)}</title><link>/memo/${m.id}</link><guid>/memo/${m.id}</guid><pubDate>${new Date(m.created_at * 1000).toUTCString()}</pubDate><description>${escapeXml(desc)}</description></item>`;
     })
     .join('');
@@ -461,6 +477,11 @@ export default {
         if ((m = path.match(/^\/admin\/trash\/(\d+)\/(restore|purge)$/)) && method === 'POST') {
           return admin.trashAction(env, Number(m[1]), m[2]);
         }
+        if (path === '/admin/users' && method === 'GET') return admin.usersPage(env);
+        if ((m = path.match(/^\/admin\/users\/(\d+)\/(delete|disable|enable)$/)) && method === 'POST') {
+          if (m[2] === 'delete') return admin.userDelete(env, request, Number(m[1]));
+          return admin.userSetStatus(env, request, Number(m[1]), m[2] === 'disable' ? 1 : 0);
+        }
         if (path === '/admin/comments' && method === 'GET') return admin.commentsPage(env, url);
         if ((m = path.match(/^\/admin\/comments\/(\d+)\/(approve|spam|delete|hide|unhide)$/)) && method === 'POST') {
           return admin.commentAction(env, request, Number(m[1]), m[2]);
@@ -481,6 +502,13 @@ export default {
       if (path === '/gate') {
         return method === 'GET' ? admin.gatePage(env, url) : admin.gatePost(env, request);
       }
+      if (path === '/register') {
+        return method === 'GET' ? admin.userRegisterPage(env, url) : admin.userRegisterPost(env, request);
+      }
+      if (path === '/login') {
+        return method === 'GET' ? admin.userLoginPage(env, url) : admin.userLoginPost(env, request);
+      }
+      if (path === '/logout' && method === 'GET') return admin.userLogout(env, request);
       if (path === '/' && method === 'GET') return homePage(env, request, url);
       let m;
       if ((m = path.match(/^\/tag\/(.+)$/)) && method === 'GET') {

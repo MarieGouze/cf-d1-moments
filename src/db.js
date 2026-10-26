@@ -2,7 +2,7 @@
 import { sha256Hex, randomToken, nowSec } from './utils.js';
 
 // 版本号（2026-10-26 用户定）：三段式 2.中.尾——增减功能递增中段、尾段归零；修 bug 只递增尾段。
-export const VERSION = '2.8.0';
+export const VERSION = '2.9.0';
 
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS memos (
@@ -66,6 +66,18 @@ const CREATE_STATEMENTS = [
     first_seen INTEGER NOT NULL,
     last_seen INTEGER NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL DEFAULT '',
+    reg_ip TEXT NOT NULL DEFAULT '',
+    status INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    last_login_at INTEGER NOT NULL DEFAULT 0,
+    last_ip TEXT NOT NULL DEFAULT '',
+    last_geo TEXT NOT NULL DEFAULT '',
+    last_ua TEXT NOT NULL DEFAULT ''
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_memos_created ON memos(created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_comments_memo ON comments(memo_id, status)`,
 ];
@@ -78,6 +90,7 @@ export const DEFAULT_SETTINGS = {
   signature: '记录生活，留住瞬间。',
   comments_enabled: '1',
   comments_moderation: '1',
+  registration_open: '1',
   site_lock: '0',
   site_password_hash: '',
   site_gate_token: '',
@@ -134,6 +147,34 @@ export async function initDb(env) {
   // 迁移：memos.view_password_hash（单条动态观看密码的 sha256；空 = 无密码）
   if (!(cols.results || []).some((c) => c.name === 'view_password_hash')) {
     await env.DB.prepare("ALTER TABLE memos ADD COLUMN view_password_hash TEXT NOT NULL DEFAULT ''").run();
+  }
+  // 迁移：memos.comments_members_only（仅注册用户可评论，逐条动态可选）
+  if (!(cols.results || []).some((c) => c.name === 'comments_members_only')) {
+    await env.DB.prepare('ALTER TABLE memos ADD COLUMN comments_members_only INTEGER NOT NULL DEFAULT 0').run();
+  }
+  // 迁移：memos.members_only（仅注册用户可见：游客看不到正文与评论，只看到登录/注册提示）
+  if (!(cols.results || []).some((c) => c.name === 'members_only')) {
+    await env.DB.prepare('ALTER TABLE memos ADD COLUMN members_only INTEGER NOT NULL DEFAULT 0').run();
+  }
+  // 迁移：sessions.user_id（0 = 管理员会话，>0 = 注册用户 id）——注册用户与管理员共用会话表、不同 cookie
+  const sCols = await env.DB.prepare("PRAGMA table_info(sessions)").all();
+  if (!(sCols.results || []).some((c) => c.name === 'user_id')) {
+    await env.DB.prepare('ALTER TABLE sessions ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0').run();
+  }
+  // 迁移：users 的状态与最后登录上下文（禁用标记 + 最后登录的 IP/地区/UA，后台用户管理页展示用）
+  const uCols = await env.DB.prepare("PRAGMA table_info(users)").all();
+  const uNames = (uCols.results || []).map((c) => c.name);
+  if (uNames.length && !uNames.includes('status')) {
+    await env.DB.prepare('ALTER TABLE users ADD COLUMN status INTEGER NOT NULL DEFAULT 0').run();
+  }
+  if (uNames.length && !uNames.includes('last_ip')) {
+    await env.DB.prepare("ALTER TABLE users ADD COLUMN last_ip TEXT NOT NULL DEFAULT ''").run();
+  }
+  if (uNames.length && !uNames.includes('last_geo')) {
+    await env.DB.prepare("ALTER TABLE users ADD COLUMN last_geo TEXT NOT NULL DEFAULT ''").run();
+  }
+  if (uNames.length && !uNames.includes('last_ua')) {
+    await env.DB.prepare("ALTER TABLE users ADD COLUMN last_ua TEXT NOT NULL DEFAULT ''").run();
   }
   // 建站时间：首次初始化时记为当前时间（页脚「建站第 N 天」用），之后不再变动
   const since = await env.DB.prepare("SELECT value FROM settings WHERE key = 'site_since'").first();
@@ -209,6 +250,44 @@ export async function destroySession(env, request) {
 export function sessionCookie(token) {
   return `mm_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${30 * 24 * 3600}`;
 }
+
+// ---------- 注册用户会话（cookie mm_user，与管理员 mm_session 分开） ----------
+
+export async function createUserSession(env, userId) {
+  const token = randomToken();
+  const hash = await sha256Hex(token);
+  const now = nowSec();
+  await env.DB.prepare('INSERT INTO sessions (token_hash, created_at, expires_at, user_id) VALUES (?, ?, ?, ?)')
+    .bind(hash, now, now + 30 * 24 * 3600, userId).run();
+  return token;
+}
+
+export async function currentUser(env, request) {
+  const cookie = request.headers.get('Cookie') || '';
+  const m = cookie.match(/(?:^|;\s*)mm_user=([a-f0-9]{64})/);
+  if (!m) return null;
+  const hash = await sha256Hex(m[1]);
+  const row = await env.DB.prepare('SELECT user_id, expires_at FROM sessions WHERE token_hash = ?').bind(hash).first();
+  if (!row || !row.user_id || row.expires_at <= nowSec()) return null;
+  const u = await env.DB.prepare('SELECT id, username, status FROM users WHERE id = ?').bind(row.user_id).first();
+  if (!u || u.status) return null;
+  return { id: u.id, username: u.username };
+}
+
+export async function destroyUserSession(env, request) {
+  const cookie = request.headers.get('Cookie') || '';
+  const m = cookie.match(/(?:^|;\s*)mm_user=([a-f0-9]{64})/);
+  if (m) {
+    const hash = await sha256Hex(m[1]);
+    await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(hash).run();
+  }
+}
+
+export function userCookie(token) {
+  return `mm_user=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${30 * 24 * 3600}`;
+}
+
+export const clearUserCookie = 'mm_user=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
 
 export const clearSessionCookie = 'mm_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
 
