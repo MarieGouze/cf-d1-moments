@@ -21,7 +21,7 @@ async function listMemos(env, { page = 1, tag = '', adminView = false } = {}) {
   const { results } = await env.DB.prepare(
     `SELECT m.*,
       (SELECT COUNT(*) FROM likes WHERE memo_id = m.id) AS like_count,
-      (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND status='approved' AND flag=''${adminView ? '' : ' AND admin_only = 0'}) AS comment_count
+      (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND status='approved' AND flag='') AS comment_count
      FROM memos m ${where}
      ORDER BY m.pinned DESC, m.created_at DESC
      LIMIT ? OFFSET ?`
@@ -33,7 +33,7 @@ async function listMemos(env, { page = 1, tag = '', adminView = false } = {}) {
 
 async function approvedComments(env, memoId, limit = 500, adminView = false) {
   const { results } = await env.DB.prepare(
-    `SELECT id, parent_id, reply_to, name, content, created_at, admin_only FROM comments WHERE memo_id = ? AND status='approved' AND flag=''${adminView ? '' : ' AND admin_only = 0'} ORDER BY created_at ASC LIMIT ?`
+    `SELECT id, parent_id, reply_to, name, content, created_at, admin_only FROM comments WHERE memo_id = ? AND status='approved' AND flag='' ORDER BY created_at ASC LIMIT ?`
   ).bind(memoId, limit).all();
   return results || [];
 }
@@ -218,7 +218,7 @@ async function memoDetail(env, request, id) {
   const memo = await env.DB.prepare(
     `SELECT m.*,
       (SELECT COUNT(*) FROM likes WHERE memo_id = m.id) AS like_count,
-      (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND status='approved' AND flag=''${adminView ? '' : ' AND admin_only = 0'}) AS comment_count
+      (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND status='approved' AND flag='') AS comment_count
      FROM memos m WHERE m.id = ?`
   ).bind(id).first();
   if (!memo || (!adminView && (memo.created_at > nowSec() || memo.hidden))) {

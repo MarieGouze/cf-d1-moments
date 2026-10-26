@@ -136,6 +136,7 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .ao-check{display:flex;align-items:center;gap:4px;font-size:13px;color:var(--sub);margin-left:12px;cursor:pointer;white-space:nowrap}
 .cmt-form .ao-check input{width:auto;padding:0;margin:0}
 .ao-tag{font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:0 5px;margin-left:6px;white-space:nowrap}
+.ao-hidden{color:#d97706;font-weight:600}
 .emoji-panel{display:none;flex-wrap:wrap;gap:2px;border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:8px}
 .emoji-panel.open{display:flex}
 .emoji-panel .emo{background:none;border:0;font-size:16px;cursor:pointer;padding:2px 3px;border-radius:6px;line-height:1.2}
@@ -199,7 +200,11 @@ function toggleCmt(id){
 function replyTo(btn, memoId, rootId){
   var name=btn.getAttribute('data-rname')||'';
   var wrap=document.getElementById('cmt-form-'+memoId);
-  if(wrap) wrap.classList.add('open');
+  if(wrap){
+    wrap.classList.add('open');
+    var img=wrap.querySelector('img.cap');
+    if(img && !img.getAttribute('src')) img.src='/captcha?t='+Date.now();
+  }
   var form=document.querySelector('#cmt-form-'+memoId+' form');
   if(!form) return;
   form.querySelector('input[name=parent_id]').value=rootId;
@@ -249,6 +254,8 @@ document.addEventListener('DOMContentLoaded', function(){
   var wrap=document.querySelector('.cmt-form'); if(!wrap) return;
   var memoId=wrap.id.replace('cmt-form-','');
   wrap.classList.add('open');
+  var capImg=wrap.querySelector('img.cap');
+  if(capImg && !capImg.getAttribute('src')) capImg.src='/captcha?t='+Date.now();
   var form=wrap.querySelector('form'); if(!form) return;
   form.querySelector('input[name=parent_id]').value=rid;
   form.querySelector('input[name=reply_to]').value=name;
@@ -428,7 +435,9 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     const total = memo.comment_count || comments.length;
     if (comments.length || total > 0) {
       const line = (c) =>
-        `<div class="cmt-line">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${isAdmin
+        c.admin_only && !isAdmin
+          ? `<div class="cmt-line">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>：<span class="ao-hidden">🔒 隐藏评论</span></div>`
+          : `<div class="cmt-line">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${isAdmin
           ? `<button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${c.parent_id || c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>`
           : `<a class="reply-btn" href="/memo/${memo.id}?reply=${c.parent_id || c.id}&rname=${encodeURIComponent(c.name)}#comments" title="回复" aria-label="回复"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></a>`}${delCmtBtn(c)}</div>`;
       const first = comments.slice(0, 2).map(line).join('');
@@ -449,14 +458,16 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       }
     }
     const row = (c, rootId) =>
-      `<div class="cmt">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}</div>`;
+      c.admin_only && !isAdmin
+        ? `<div class="cmt">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>：<span class="ao-hidden">🔒 隐藏评论</span><span class="when">${timeAgo(c.created_at)}</span></div>`
+        : `<div class="cmt">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}</div>`;
     cmtHtml = `<div class="cmt-box">${roots
       .map((r) => row(r, r.id) + (byParent.get(r.id) || []).map((c) => `<div class="replies">${row(c, r.id)}</div>`).join(''))
       .join('')}</div>`;
   }
   if (pwLocked) cmtHtml = '';
   const cmtForm =
-    (detail || isAdmin) && !pwLocked && settings.comments_enabled === '1'
+    !pwLocked && settings.comments_enabled === '1'
       ? `<div class="cmt-form" id="cmt-form-${memo.id}">
           <form method="post" action="/memo/${memo.id}/comment">
             <input type="text" name="website" tabindex="-1" autocomplete="off" style="display:none" aria-hidden="true">
@@ -465,7 +476,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
             <input type="hidden" name="reply_to" value="">
             <div class="row">
               <input name="name" maxlength="20" placeholder="你的昵称" value="${isAdmin ? esc(settings.nickname || '') : ''}" required>
-              ${isAdmin ? '' : `<img class="cap" src="/captcha" alt="验证码" title="点图刷新" onclick="refreshCap(this)">
+              ${isAdmin ? '' : `<img class="cap" alt="验证码" title="点图刷新" onclick="refreshCap(this)">
               <input name="captcha" maxlength="4" placeholder="验证码" required style="max-width:110px">`}
             </div>
             <textarea name="content" rows="3" maxlength="50" data-ph="写下你的评论（最多 50 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" placeholder="写下你的评论（最多 50 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" required></textarea>
@@ -503,8 +514,8 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       <span class="spacer"></span>
       ${pwLocked ? '' : `<button class="act${liked ? ' liked' : ''}" onclick="likeMemo(${memo.id},this)">❤ <span class="lc">${memo.like_count || 0}</span></button>
       ${(detail || isAdmin)
-        ? `<button class="act" onclick="toggleCmt(${memo.id})">💬 ${memo.comment_count || 0}</button>`
-        : `<a class="act" href="/memo/${memo.id}#comments" style="text-decoration:none">💬 ${memo.comment_count || 0}</a>`}`}
+        ? `<button class="act" type="button" title="评论" onclick="toggleCmt(${memo.id})">💬 ${memo.comment_count || 0}</button>`
+        : `<button class="act" type="button" title="评论" onclick="toggleCmt(${memo.id})">💬 ${memo.comment_count || 0}</button>`}`}
     </div>
     <div id="comments">${cmtHtml}${cmtForm}</div>
   </article>`;
