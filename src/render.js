@@ -172,7 +172,7 @@ svg.cmt-ava .fg{fill:var(--sub)}
 .marquee{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:14px;color:var(--text)}
 .mq-ico{flex:none}
 .mq-track{flex:1;overflow:hidden;white-space:nowrap}
-.mq-text{display:inline-block;padding-left:100%;animation:mqscroll linear infinite}
+.mq-text{display:inline-block;padding-left:100%;animation:mqscroll linear infinite;font-weight:700}
 .marquee:hover .mq-text{animation-play-state:paused}
 @keyframes mqscroll{from{transform:translateX(0)}to{transform:translateX(-100%)}}
 .notice{background:#fff7e0;border:1px solid #f0dfa0;color:#6b5c14;border-radius:10px;padding:10px 14px;margin:12px 0;font-size:14px}
