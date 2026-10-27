@@ -412,7 +412,7 @@ function contentHtml(memo, detail) {
   return renderContent(memo.content_md);
 }
 
-export function memoCard(memo, settings, { comments = [], liked = false, detail = false, isAdmin = false, user = null, filesUnlocked = false, pwLocked = false, membersLocked = false, unlockErr = '' } = {}) {
+export function memoCard(memo, settings, { comments = [], liked = false, detail = false, isAdmin = false, user = null, userAvatars = {}, filesUnlocked = false, pwLocked = false, membersLocked = false, unlockErr = '' } = {}) {
   const media = parseJsonSafe(memo.media, []);
   const tags = String(memo.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
   const avatarStyle = settings.avatar_url
@@ -420,6 +420,14 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     : '';
   const avatarCls = settings.avatar_url ? 'm-avatar' : 'm-avatar m-avatar-fallback';
   const avatarInner = settings.avatar_url ? '' : esc((settings.nickname || '主').slice(0, 1));
+  // 注册用户投稿：头像用作者注册时绑定的头像图（无图时回退用户名首字），昵称行显示作者名
+  const isUserPost = memo.author_id > 0;
+  const cardAvatarCls = isUserPost ? (memo.author_avatar ? 'm-avatar' : 'm-avatar m-avatar-fallback') : avatarCls;
+  const cardAvatarStyle = isUserPost
+    ? (memo.author_avatar ? `style="background-image:url('${esc(memo.author_avatar)}')"` : '')
+    : avatarStyle;
+  const cardAvatarInner = isUserPost ? (memo.author_avatar ? '' : esc((memo.author_name || '游').slice(0, 1))) : avatarInner;
+  const cardNick = isUserPost ? esc(memo.author_name || '') : esc(settings.nickname);
   // 列表页：默认显示前 2 条评论（无框、纯文字行），超过 2 条时追加「共 XX 条评论，点击查看全部」
   // 详情页：显示全部评论（带回复层级）
   let cmtHtml = '';
@@ -428,6 +436,10 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
   const cmtAvatar = (c) => {
     if (settings.avatar_url && c.name === settings.nickname) {
       return `<img class="cmt-ava" src="${esc(settings.avatar_url)}" alt="">`;
+    }
+    // 注册用户用其注册时绑定的头像（注册后不可修改）
+    if (userAvatars[c.name]) {
+      return `<img class="cmt-ava" src="${esc(userAvatars[c.name])}" alt="" loading="lazy">`;
     }
     let h = 5381;
     const name = String(c.name || '');
@@ -503,9 +515,9 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       : '';
   return `<article class="memo">
     <div class="memo-head">
-      <div class="${avatarCls}" ${avatarStyle}>${avatarInner}</div>
+      <div class="${cardAvatarCls}" ${cardAvatarStyle}>${cardAvatarInner}</div>
       <div>
-        <div class="m-nick">${esc(settings.nickname)}${memo.pinned ? '<span class="pin">📌 置顶</span>' : ''}${memo.hidden && isAdmin ? '<span class="pin" style="color:#999">🔒 隐藏</span>' : ''}${memo.view_password_hash && isAdmin ? '<span class="pin">🔑 密码</span>' : ''}${memo.members_only && isAdmin ? '<span class="pin">👥 仅注册用户</span>' : ''}</div>
+        <div class="m-nick">${cardNick}${memo.pinned ? '<span class="pin">📌 置顶</span>' : ''}${memo.hidden && isAdmin ? '<span class="pin" style="color:#999">🔒 隐藏</span>' : ''}${memo.view_password_hash && isAdmin ? '<span class="pin">🔑 密码</span>' : ''}${memo.members_only && isAdmin ? '<span class="pin">👥 仅注册用户</span>' : ''}</div>
       </div>
     </div>
     <div class="m-body">
@@ -529,6 +541,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       ${detail ? '' : `<a href="/memo/${memo.id}" style="color:var(--sub)">详情</a>`}
       ${isAdmin ? `<a class="act" href="/admin/memos/${memo.id}/edit" style="text-decoration:none">✏️ 编辑</a>` : ''}
       ${isAdmin ? `<form method="post" action="/admin/memos/${memo.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条动态？评论和点赞会一并移入垃圾桶。')"><button class="act" type="submit" style="color:#e5484d">&#x1F5D1;&#xFE0E; 删除</button></form>` : ''}
+      ${user && settings.users_can_post === '1' && memo.author_id === user.id ? `<a class="act" href="/post/${memo.id}/edit" style="text-decoration:none">✏️ 编辑</a><form method="post" action="/post/${memo.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条动态？评论和点赞会一并移入垃圾桶。')"><button class="act" type="submit" style="color:#e5484d">&#x1F5D1;&#xFE0E; 删除</button></form>` : ''}
       <span class="spacer"></span>
       ${locked ? '' : `<button class="act${liked ? ' liked' : ''}" onclick="likeMemo(${memo.id},this)">❤ <span class="lc">${memo.like_count || 0}</span></button>
       ${(detail || isAdmin)
@@ -576,7 +589,7 @@ export function layout(settings, { title, body, activeTag = '', adminView = fals
     <span id="tag-chips"></span>
     <span class="spacer"></span>
     ${!adminView ? (user
-      ? `<span class="tb-user">👤 ${esc(user.username)}</span><a class="tb-link" href="/logout">退出</a>`
+      ? `${settings.users_can_post === '1' ? '<a class="tb-btn" href="/post/new" title="发布动态" aria-label="发布动态"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></a>' : ''}<span class="tb-user">${user.avatar ? `<img src="${esc(user.avatar)}" alt="" style="width:20px;height:20px;border-radius:50%;vertical-align:-5px;margin-right:4px">` : '👤 '}${esc(user.username)}</span><a class="tb-link" href="/logout">退出</a>`
       : `<a class="tb-link" href="/login">登录</a>${settings.registration_open === '1' ? '<a class="tb-link" href="/register">注册</a>' : ''}`) : ''}
     ${adminView ? '<a class="tb-btn" href="/admin/memos/new" title="发布" aria-label="发布"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></a><a class="tb-btn" href="/admin/logout" title="退出" aria-label="退出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12v.01"/><path d="M13 4.6v15.6a1 1 0 0 1-1.2 1L5 20V5.6a2 2 0 0 1 1.5-1.9l4-1A2 2 0 0 1 13 4.6Z"/></svg></a>' : ''}
   </div>

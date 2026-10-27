@@ -19,10 +19,10 @@ async function listMemos(env, { page = 1, tag = '', adminView = false } = {}) {
   const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
   const offset = (page - 1) * PAGE_SIZE;
   const { results } = await env.DB.prepare(
-    `SELECT m.*,
+    `SELECT m.*, u.avatar AS author_avatar,
       (SELECT COUNT(*) FROM likes WHERE memo_id = m.id) AS like_count,
       (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND status='approved' AND flag='') AS comment_count
-     FROM memos m ${where}
+     FROM memos m LEFT JOIN users u ON u.id = m.author_id ${where}
      ORDER BY m.pinned DESC, m.created_at DESC
      LIMIT ? OFFSET ?`
   ).bind(...binds, PAGE_SIZE + 1, offset).all();
@@ -180,6 +180,19 @@ async function viewUnlocked(env, request, memo, settings, adminView) {
   return cookies['mm_view_' + memo.id] === token;
 }
 
+// 评论里注册用户绑定的头像映射（username -> 头像路径），供评论区显示其注册头像
+async function avatarMapFor(env, comments) {
+  const names = [...new Set((comments || []).map((c) => c.name).filter(Boolean))];
+  if (!names.length) return {};
+  const ph = names.map(() => '?').join(',');
+  const { results } = await env.DB.prepare(
+    `SELECT username, avatar FROM users WHERE username IN (${ph})`
+  ).bind(...names).all();
+  const map = {};
+  for (const r of results || []) if (r.avatar) map[r.username] = r.avatar;
+  return map;
+}
+
 async function homePage(env, request, url, { tag = '' } = {}) {
   const [settings, adminView, user] = await Promise.all([getSettings(env), isAdmin(env, request), currentUser(env, request)]);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1);
@@ -196,8 +209,9 @@ async function homePage(env, request, url, { tag = '' } = {}) {
   const commentsList = await Promise.all(
     memos.map((m, i) => (viewOk[i] && !mLocked[i] ? approvedComments(env, m.id, 500, adminView) : Promise.resolve([])))
   );
+  const userAvatars = await avatarMapFor(env, commentsList.flat());
   const cards = memos.map((m, i) =>
-    memoCard(m, settings, { comments: commentsList[i], liked: liked.has(m.id), isAdmin: adminView, user, filesUnlocked: unlocked.has(m.id), pwLocked: !viewOk[i], membersLocked: mLocked[i] })
+    memoCard(m, settings, { comments: commentsList[i], liked: liked.has(m.id), isAdmin: adminView, user, userAvatars, filesUnlocked: unlocked.has(m.id), pwLocked: !viewOk[i], membersLocked: mLocked[i] })
   );
   const base = tag ? `/tag/${encodeURIComponent(tag)}` : '/';
   const announce = (settings.announce_text || '').trim();
@@ -218,10 +232,10 @@ async function memoDetail(env, request, id) {
   const adminView = await isAdmin(env, request);
   const user = await currentUser(env, request);
   const memo = await env.DB.prepare(
-    `SELECT m.*,
+    `SELECT m.*, u.avatar AS author_avatar,
       (SELECT COUNT(*) FROM likes WHERE memo_id = m.id) AS like_count,
       (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND status='approved' AND flag='') AS comment_count
-     FROM memos m WHERE m.id = ?`
+     FROM memos m LEFT JOIN users u ON u.id = m.author_id WHERE m.id = ?`
   ).bind(id).first();
   if (!memo || (!adminView && (memo.created_at > nowSec() || memo.hidden))) {
     return htmlResponse(layout(settings, { title: '没有找到', body: '<div class="memo">这条动态不存在。</div>', adminView }), 404);
@@ -241,7 +255,8 @@ async function memoDetail(env, request, id) {
       unlockErr = `密码不对，请重试。${n ? `（已错 ${escapeXml(n)} 次，错满 5 次将暂停 10 分钟）` : ''}`;
     }
   }
-  const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, user, filesUnlocked: unlocked.has(id), pwLocked: !viewOk, membersLocked, unlockErr })}</div>
+  const userAvatars = await avatarMapFor(env, comments);
+  const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, user, userAvatars, filesUnlocked: unlocked.has(id), pwLocked: !viewOk, membersLocked, unlockErr })}</div>
     <div class="pager"><a href="/">← 回到时间线</a></div>`;
   const pageTitle = memo.title || (viewOk && !membersLocked ? plainTextExcerpt(memo.content_md, 40) : '') || settings.site_name;
   return htmlResponse(layout(await withUsage(env, settings), { title: `${pageTitle} · ${settings.site_name}`, body, adminView, user }));
@@ -509,6 +524,27 @@ export default {
         return method === 'GET' ? admin.userLoginPage(env, url) : admin.userLoginPost(env, request);
       }
       if (path === '/logout' && method === 'GET') return admin.userLogout(env, request);
+      if (path === '/post/new') {
+        return method === 'GET' ? admin.userPostPage(env, request, null) : admin.userPostSave(env, request, null);
+      }
+      if (path === '/upload' && method === 'POST') {
+        if (await isAdmin(env, request)) return admin.upload(env, request);
+        if (await currentUser(env, request)) {
+          // 投稿上传限制（服务端强制）：仅图片或压缩包，单个 ≤500KB
+          const form = await request.clone().formData().catch(() => null);
+          const file = form && form.get('file');
+          if (!file || typeof file === 'string' || !file.size) {
+            return Response.json({ error: '没有文件' }, { status: 400 });
+          }
+          const lname = (file.name || '').toLowerCase();
+          const isImg = (file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|bmp|avif|heic)$/.test(lname);
+          const isArc = /\.(zip|rar|7z|tar|gz|tgz|bz2|xz)$/.test(lname);
+          if (!isImg && !isArc) return Response.json({ error: '投稿只能上传图片或压缩包' }, { status: 400 });
+          if (file.size > 500 * 1024) return Response.json({ error: '投稿文件不能超过 500KB' }, { status: 400 });
+          return admin.upload(env, request);
+        }
+        return Response.json({ error: '请先登录' }, { status: 403 });
+      }
       if (path === '/' && method === 'GET') return homePage(env, request, url);
       let m;
       if ((m = path.match(/^\/tag\/(.+)$/)) && method === 'GET') {
@@ -525,6 +561,14 @@ export default {
       }
       if ((m = path.match(/^\/memo\/(\d+)\/unlock$/)) && method === 'POST') {
         return admin.memoUnlock(env, request, Number(m[1]));
+      }
+      if ((m = path.match(/^\/post\/(\d+)\/edit$/))) {
+        return method === 'GET'
+          ? admin.userPostPage(env, request, Number(m[1]))
+          : admin.userPostSave(env, request, Number(m[1]));
+      }
+      if ((m = path.match(/^\/post\/(\d+)\/delete$/)) && method === 'POST') {
+        return admin.userPostDelete(env, request, Number(m[1]));
       }
       return new Response('Not Found', { status: 404 });
     } catch (err) {

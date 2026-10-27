@@ -3,8 +3,9 @@
 import {
   getSettings, setSetting, createSession, destroySession, isAdmin,
   sessionCookie, clearSessionCookie, parseTags, parseJsonSafe, effectiveAdminHash, gateCookie,
-  createUserSession, destroyUserSession, userCookie, clearUserCookie,
+  createUserSession, destroyUserSession, userCookie, clearUserCookie, currentUser, randomAvatar,
 } from './db.js';
+import { layout } from './render.js';
 import { sha256Hex, randomToken, nowSec, escapeHtml as esc, htmlResponse, redirect, clientIp, parseCookies, verifyCaptcha } from './utils.js';
 import { renderContent, excerptOf } from './richtext.js';
 
@@ -572,7 +573,8 @@ export async function dashboard(env) {
       const future = m.created_at > nowSec() ? ' <span class="hint">（定时，未发布）</span>' : '';
       const hid = m.hidden ? ' <span class="hint">（🔒 隐藏）</span>' : '';
       const text = esc(excerptOf(m.content_md, 60)) || '<span class="hint">（无文字）</span>';
-      return `<tr><td>${m.pinned ? '📌 ' : ''}${text}${future}${hid}<div class="hint">${new Date((m.created_at + 28800) * 1000).toISOString().slice(0, 16).replace('T', ' ')} · ❤ ${m.like_count} · 💬 ${m.cc}${m.pc ? `（待审 ${m.pc}）` : ''}</div></td>
+      const author = m.author_id ? ` <span class="hint">（投稿：${esc(m.author_name)}）</span>` : '';
+      return `<tr><td>${m.pinned ? '📌 ' : ''}${text}${future}${hid}${author}<div class="hint">${new Date((m.created_at + 28800) * 1000).toISOString().slice(0, 16).replace('T', ' ')} · ❤ ${m.like_count} · 💬 ${m.cc}${m.pc ? `（待审 ${m.pc}）` : ''}</div></td>
       <td style="white-space:nowrap"><a href="/admin/memos/${m.id}/edit">编辑</a>
       <form method="post" action="/admin/memos/${m.id}/delete" style="display:inline" onsubmit="return confirm('删除这条动态？评论和点赞也会一起删。')"><button class="btn danger" style="padding:4px 10px">删除</button></form></td></tr>`;
     })
@@ -878,8 +880,8 @@ export async function userRegisterPost(env, request) {
   const cf = request.cf || {};
   const geo = JSON.stringify({ country: cf.country || '', region: cf.region || '', city: cf.city || '' });
   const ua = (request.headers.get('User-Agent') || '').slice(0, 300);
-  const ins = await env.DB.prepare('INSERT INTO users (username, password_hash, reg_ip, created_at, last_login_at, last_ip, last_geo, last_ua) VALUES (?,?,?,?,?,?,?,?)')
-    .bind(username, await userHash(username, pw), ip, now, now, ip, geo, ua).run();
+  const ins = await env.DB.prepare('INSERT INTO users (username, password_hash, reg_ip, created_at, last_login_at, last_ip, last_geo, last_ua, avatar) VALUES (?,?,?,?,?,?,?,?,?)')
+    .bind(username, await userHash(username, pw), ip, now, now, ip, geo, ua, randomAvatar()).run();
   const token = await createUserSession(env, ins.meta.last_row_id);
   return redirect(next, { 'Set-Cookie': userCookie(token) });
 }
@@ -925,6 +927,10 @@ export async function userLoginPost(env, request) {
   const ua = (request.headers.get('User-Agent') || '').slice(0, 300);
   await env.DB.prepare('UPDATE users SET last_login_at = ?, last_ip = ?, last_geo = ?, last_ua = ? WHERE id = ?')
     .bind(now, ip, geo, ua, u.id).run();
+  // 老用户（头像功能上线前注册的）首次登录时补绑一个随机头像
+  if (!u.avatar) {
+    await env.DB.prepare('UPDATE users SET avatar = ? WHERE id = ?').bind(randomAvatar(), u.id).run();
+  }
   const token = await createUserSession(env, u.id);
   return redirect(next, { 'Set-Cookie': userCookie(token) });
 }
@@ -948,7 +954,7 @@ export async function usersPage(env) {
   const { results } = await env.DB.prepare('SELECT id, username, reg_ip, status, created_at, last_login_at, last_ip, last_geo, last_ua FROM users ORDER BY id DESC LIMIT 200').all();
   const fmt = (ts) => ts ? new Date((ts + 28800) * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—';
   const rows = (results || []).map((u) => `<tr>
-      <td><b>${esc(u.username)}</b> <span class="hint">#${u.id}</span>${u.status ? ' <span class="hint" style="color:#e5484d">（已禁用）</span>' : ''}<div class="hint">注册 IP ${esc(u.reg_ip || '—')}</div></td>
+      <td>${u.avatar ? `<img src="${esc(u.avatar)}" alt="" style="width:26px;height:26px;border-radius:50%;vertical-align:middle;margin-right:6px">` : ''}<b>${esc(u.username)}</b> <span class="hint">#${u.id}</span>${u.status ? ' <span class="hint" style="color:#e5484d">（已禁用）</span>' : ''}<div class="hint">注册 IP ${esc(u.reg_ip || '—')}</div></td>
       <td style="white-space:nowrap">${fmt(u.created_at)}</td>
       <td style="white-space:nowrap">${fmt(u.last_login_at)}</td>
       <td>${u.last_ua ? `<span title="${esc(u.last_ua)}">${esc(deviceOf(u.last_ua))} · ${esc(parseUa(u.last_ua))}</span>` : '—'}</td>
@@ -978,6 +984,124 @@ export async function userDelete(env, request, id) {
   await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id).run();
   await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id).run();
   return redirect('/admin/users');
+}
+
+// ---------------- 注册用户投稿（发动态） ----------------
+// 站长在设置里打开 users_can_post 后，注册用户可发布/编辑/删除自己的动态。
+// 投稿表单是简化版：只有标题、正文、标签、上传，没有置顶/隐藏/门控/观看密码等管理员选项；
+// 保存时只读白名单字段，就算伪造表单塞了 pinned 之类也不会生效。
+
+async function postGuard(env, request, nextPath) {
+  const s = await getSettings(env);
+  if (s.users_can_post !== '1') return { err: redirect('/') };
+  const user = await currentUser(env, request);
+  if (!user) return { err: redirect('/login?next=' + encodeURIComponent(nextPath || '/post/new')) };
+  return { s, user };
+}
+
+export async function userPostPage(env, request, id) {
+  const g = await postGuard(env, request, id ? `/post/${id}/edit` : '/post/new');
+  if (g.err) return g.err;
+  let memo = { title: '', content_md: '', tags: '', media: '[]' };
+  if (id) {
+    const m = await env.DB.prepare('SELECT * FROM memos WHERE id = ?').bind(id).first();
+    if (!m || m.author_id !== g.user.id) return redirect('/');
+    memo = m;
+  }
+  const mediaArr = parseJsonSafe(memo.media, []);
+  const mediaJson = JSON.stringify(mediaArr).replace(/</g, '\\u003c');
+  const inp = 'width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text);font-size:14px;margin-bottom:10px;font-family:inherit';
+  const body = `<div class="feed-box" style="padding:16px">
+    <h3 style="margin:2px 0 12px">${id ? '✏️ 编辑动态' : '✏️ 发布动态'}</h3>
+    <form method="post" action="${id ? `/post/${id}/edit` : '/post/new'}">
+      <input name="title" maxlength="80" placeholder="标题（可选）" value="${esc(memo.title || '')}" style="${inp}">
+      <textarea name="content_md" rows="8" placeholder="写点什么…（支持 Markdown）" style="${inp}">${esc(memo.content_md || '')}</textarea>
+      <input name="tags" placeholder="标签，逗号分隔（可选）" value="${esc(memo.tags || '')}" style="${inp}">
+      <div style="margin:2px 0 8px;font-size:14px">上传图片 / 压缩包（单个 ≤500KB）：<input type="file" accept="image/*,.zip,.rar,.7z,.tar,.gz,.tgz,.bz2,.xz" onchange="upFile(this)"></div>
+      <div id="media-box"></div>
+      <input type="hidden" name="media_json" id="media_json" value="[]">
+      <div style="margin-top:10px"><button class="btn" type="submit">${id ? '保存修改' : '发布'}</button>
+      <a href="/" style="margin-left:10px;color:var(--sub)">取消</a></div>
+    </form>
+    <style>.up-item{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:4px 6px;margin:0 6px 6px 0;font-size:12px;color:var(--text)}.up-item img{width:44px;height:44px;object-fit:cover;border-radius:6px}.up-item button{border:0;background:none;cursor:pointer;color:#e5484d;font-size:15px;padding:0 2px}</style>
+    <script>
+var mediaList = ${mediaJson};
+function renderMedia(){
+  var box = document.getElementById('media-box');
+  box.innerHTML = mediaList.map(function(m, i){
+    var inner = m.type === 'image' ? '<img src="' + m.url + '">' : '<span>' + (m.name || m.type) + '</span>';
+    return '<span class="up-item">' + inner + '<button type="button" onclick="rmMedia(' + i + ')">×</button></span>';
+  }).join('');
+  document.getElementById('media_json').value = JSON.stringify(mediaList);
+}
+function rmMedia(i){ mediaList.splice(i, 1); renderMedia(); }
+function upFile(input){
+  var f = input.files && input.files[0];
+  if(!f) return;
+  var lower = f.name.toLowerCase();
+  var isImg = f.type.indexOf('image/') === 0 || /\\.(png|jpe?g|gif|webp|svg|bmp|avif|heic)$/.test(lower);
+  var isArc = /\\.(zip|rar|7z|tar|gz|tgz|bz2|xz)$/.test(lower);
+  if(!isImg && !isArc){ alert('只能上传图片或压缩包'); input.value = ''; return; }
+  if(f.size > 500 * 1024){ alert('文件不能超过 500KB'); input.value = ''; return; }
+  var fd = new FormData();
+  fd.append('file', f);
+  fetch('/upload', { method: 'POST', body: fd }).then(function(r){ return r.json(); }).then(function(d){
+    if(d && d.url){
+      mediaList.push({ type: isImg ? 'image' : 'file', url: d.url, name: f.name });
+      renderMedia();
+    } else { alert((d && d.error) || '上传失败'); }
+  }).catch(function(){ alert('上传失败'); });
+  input.value = '';
+}
+renderMedia();
+    </script>
+  </div>`;
+  return htmlResponse(layout(g.s, { title: (id ? '编辑动态' : '发布动态') + ' · ' + g.s.site_name, body, user: g.user }));
+}
+
+function cleanUserMedia(raw) {
+  const arr = parseJsonSafe(raw, []);
+  if (!Array.isArray(arr)) return '[]';
+  const out = [];
+  for (const m of arr.slice(0, 30)) {
+    if (!m || typeof m.url !== 'string' || !m.url.startsWith('/media/')) continue;
+    const t = ['image', 'video', 'file'].includes(m.type) ? m.type : 'file';
+    out.push({ type: t, url: m.url, name: String(m.name || '').replace(/[<>"']/g, '').slice(0, 80) });
+  }
+  return JSON.stringify(out);
+}
+
+export async function userPostSave(env, request, id) {
+  const g = await postGuard(env, request, id ? `/post/${id}/edit` : '/post/new');
+  if (g.err) return g.err;
+  const f = await request.formData();
+  const title = String(f.get('title') || '').trim().slice(0, 80);
+  const content = String(f.get('content_md') || '').trim();
+  const media = cleanUserMedia(f.get('media_json'));
+  const tags = parseTags(f.get('tags')).join(',');
+  if (!content && parseJsonSafe(media, []).length === 0) {
+    return redirect(id ? `/post/${id}/edit` : '/post/new');
+  }
+  const now = nowSec();
+  if (id) {
+    const m = await env.DB.prepare('SELECT author_id FROM memos WHERE id = ?').bind(id).first();
+    if (!m || m.author_id !== g.user.id) return redirect('/');
+    await env.DB.prepare('UPDATE memos SET title=?, content_md=?, tags=?, media=?, updated_at=? WHERE id=?')
+      .bind(title, content, tags, media, now, id).run();
+    return redirect(`/memo/${id}`);
+  }
+  const ins = await env.DB.prepare(
+    'INSERT INTO memos (title, content_md, tags, media, ext_type, ext_data, pinned, hidden, files_gated, content_gated, comments_members_only, members_only, view_password_hash, author_id, author_name, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+  ).bind(title, content, tags, media, '', '{}', 0, 0, 0, 0, 0, 0, '', g.user.id, g.user.username, now, now).run();
+  return redirect(`/memo/${ins.meta.last_row_id}`);
+}
+
+export async function userPostDelete(env, request, id) {
+  const g = await postGuard(env, request, '/');
+  if (g.err) return g.err;
+  const m = await env.DB.prepare('SELECT author_id FROM memos WHERE id = ?').bind(id).first();
+  if (!m || m.author_id !== g.user.id) return redirect('/');
+  return memoDelete(env, request, id);
 }
 
 // ---------------- 评论审核 ----------------
@@ -1098,6 +1222,7 @@ export async function settingsPage(env, url) {
       <div class="upl-row"><input name="cover_url" value="${esc(s.cover_url)}" placeholder="/media/… 或 https://…"><label class="btn upl-btn">上传替换<input type="file" accept="image/*" data-for="cover_url" hidden></label></div>
       <label style="display:block;margin:8px 0"><input type="checkbox" name="comments_enabled" value="1" style="width:auto" ${s.comments_enabled === '1' ? 'checked' : ''}> 开启评论</label>
       <label style="display:block;margin:8px 0"><input type="checkbox" name="registration_open" value="1" style="width:auto" ${s.registration_open === '1' ? 'checked' : ''}> 开放游客注册（注册后可用自己的用户名评论；已注册用户在「注册用户」页管理）</label>
+      <label style="display:block;margin:8px 0"><input type="checkbox" name="users_can_post" value="1" style="width:auto" ${s.users_can_post === '1' ? 'checked' : ''}> 开放注册用户发动态（注册用户可发布、编辑、删除自己的动态；他们没有置顶/隐藏/门控/观看密码等管理员选项，动态会标注作者名；你仍可管理全部动态）</label>
       <label>评论是否审核</label>
       <select name="comments_moderation">
         <option value="1" ${s.comments_moderation !== '0' ? 'selected' : ''}>先审后显（评论要后台点通过才显示）</option>
@@ -1175,6 +1300,7 @@ export async function settingsSave(env, request) {
   await setSetting(env, 'cover_url', f.get('cover_url'));
   await setSetting(env, 'comments_enabled', f.get('comments_enabled') ? '1' : '0');
   await setSetting(env, 'registration_open', f.get('registration_open') ? '1' : '0');
+  await setSetting(env, 'users_can_post', f.get('users_can_post') ? '1' : '0');
   await setSetting(env, 'comments_moderation', f.get('comments_moderation') === '0' ? '0' : '1');
   await setSetting(env, 'spam_keywords', String(f.get('spam_keywords') || '').slice(0, 2000));
   await setSetting(env, 'links', JSON.stringify(links));

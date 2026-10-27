@@ -2,7 +2,7 @@
 import { sha256Hex, randomToken, nowSec } from './utils.js';
 
 // 版本号（2026-10-26 用户定）：三段式 2.中.尾——增减功能递增中段、尾段归零；修 bug 只递增尾段。
-export const VERSION = '2.9.3';
+export const VERSION = '2.10.0';
 
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS memos (
@@ -91,6 +91,7 @@ export const DEFAULT_SETTINGS = {
   comments_enabled: '1',
   comments_moderation: '1',
   registration_open: '1',
+  users_can_post: '0',
   site_lock: '0',
   site_password_hash: '',
   site_gate_token: '',
@@ -156,10 +157,22 @@ export async function initDb(env) {
   if (!(cols.results || []).some((c) => c.name === 'members_only')) {
     await env.DB.prepare('ALTER TABLE memos ADD COLUMN members_only INTEGER NOT NULL DEFAULT 0').run();
   }
+  // 迁移：memos.author_id / author_name（投稿作者：0+空 = 站长本人；>0 = 注册用户投稿，记其用户名）
+  if (!(cols.results || []).some((c) => c.name === 'author_id')) {
+    await env.DB.prepare('ALTER TABLE memos ADD COLUMN author_id INTEGER NOT NULL DEFAULT 0').run();
+  }
+  if (!(cols.results || []).some((c) => c.name === 'author_name')) {
+    await env.DB.prepare("ALTER TABLE memos ADD COLUMN author_name TEXT NOT NULL DEFAULT ''").run();
+  }
   // 迁移：sessions.user_id（0 = 管理员会话，>0 = 注册用户 id）——注册用户与管理员共用会话表、不同 cookie
   const sCols = await env.DB.prepare("PRAGMA table_info(sessions)").all();
   if (!(sCols.results || []).some((c) => c.name === 'user_id')) {
     await env.DB.prepare('ALTER TABLE sessions ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0').run();
+  }
+  // 迁移：users.avatar（注册时随机绑定的头像路径，绑定后不可修改；老用户首次登录时补绑）
+  const usrAvCols = await env.DB.prepare("PRAGMA table_info(users)").all();
+  if (!(usrAvCols.results || []).some((c) => c.name === 'avatar')) {
+    await env.DB.prepare("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT ''").run();
   }
   // 迁移：users 的状态与最后登录上下文（禁用标记 + 最后登录的 IP/地区/UA，后台用户管理页展示用）
   const uCols = await env.DB.prepare("PRAGMA table_info(users)").all();
@@ -269,9 +282,14 @@ export async function currentUser(env, request) {
   const hash = await sha256Hex(m[1]);
   const row = await env.DB.prepare('SELECT user_id, expires_at FROM sessions WHERE token_hash = ?').bind(hash).first();
   if (!row || !row.user_id || row.expires_at <= nowSec()) return null;
-  const u = await env.DB.prepare('SELECT id, username, status FROM users WHERE id = ?').bind(row.user_id).first();
+  const u = await env.DB.prepare('SELECT id, username, status, avatar FROM users WHERE id = ?').bind(row.user_id).first();
   if (!u || u.status) return null;
-  return { id: u.id, username: u.username };
+  return { id: u.id, username: u.username, avatar: u.avatar || '' };
+}
+
+// 注册时随机绑定的头像（内置 micah 头像包，绑定后不可修改）
+export function randomAvatar() {
+  return '/media/site/avatars/micah/' + Math.floor(Math.random() * 100) + '.svg';
 }
 
 export async function destroyUserSession(env, request) {
