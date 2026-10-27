@@ -1,5 +1,5 @@
 // cf-d1-moments：极简朋友圈（仿 kingwrcy/moments 版面，Cloudflare Workers + D1 + R2 重写）
-import { initDb, getSettings, isAdmin, gateCookieOk, currentUser } from './db.js';
+import { initDb, getSettings, isAdmin, gateCookieOk, currentUser, notifyForComment, unreadNotifCount } from './db.js';
 import { layout, memoCard, tagChipsScript, linksBlock, pagerHtml, noticeHtml, timeAgo } from './render.js';
 import * as admin from './admin.js';
 import {
@@ -224,7 +224,8 @@ async function homePage(env, request, url, { tag = '' } = {}) {
     <div class="feed-box">${mq}${cards.join('<div class="memo-sep"></div>') || '<div class="memo">还没有动态。</div>'}${linksBlock(settings)}</div>
     ${pagerHtml(page, hasMore, base)}
     ${tagChipsScript(tags, tag)}`;
-  return htmlResponse(layout(await withUsage(env, settings), { title: tag ? `#${tag} · ${settings.site_name}` : settings.site_name, body, activeTag: tag, adminView, user }));
+  const notifCount = user ? await unreadNotifCount(env, user.id) : 0;
+  return htmlResponse(layout(await withUsage(env, settings), { title: tag ? `#${tag} · ${settings.site_name}` : settings.site_name, body, activeTag: tag, adminView, user, notifCount }));
 }
 
 async function memoDetail(env, request, id) {
@@ -259,7 +260,8 @@ async function memoDetail(env, request, id) {
   const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, user, userAvatars, filesUnlocked: unlocked.has(id), pwLocked: !viewOk, membersLocked, unlockErr })}</div>
     <div class="pager"><a href="/">← 回到时间线</a></div>`;
   const pageTitle = memo.title || (viewOk && !membersLocked ? plainTextExcerpt(memo.content_md, 40) : '') || settings.site_name;
-  return htmlResponse(layout(await withUsage(env, settings), { title: `${pageTitle} · ${settings.site_name}`, body, adminView, user }));
+  const notifCount = user ? await unreadNotifCount(env, user.id) : 0;
+  return htmlResponse(layout(await withUsage(env, settings), { title: `${pageTitle} · ${settings.site_name}`, body, adminView, user, notifCount }));
 }
 
 async function likePost(env, request, id) {
@@ -373,10 +375,37 @@ async function commentPost(env, request, id) {
   const moderation = settings.comments_moderation !== '0';
   const status = adminReq ? 'approved' : flag ? 'pending' : moderation ? 'pending' : 'approved';
   const adminOnly = !adminReq && form.get('admin_only') ? 1 : 0;
-  await env.DB.prepare(
+  const ins = await env.DB.prepare(
     'INSERT INTO comments (memo_id, parent_id, reply_to, name, content, status, flag, ip, user_agent, geo, admin_only, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
   ).bind(id, parentId, replyTo, name, content, status, flag, ip, ua.slice(0, 300), geo, adminOnly, now).run();
+  // 发表即通过的评论立刻发通知；待审的等管理员通过时再补发（见后台审核）
+  if (status === 'approved' && ins && ins.meta && ins.meta.last_row_id) {
+    await notifyForComment(env, { id: ins.meta.last_row_id, memo_id: id, parent_id: parentId, reply_to: replyTo, name, content });
+  }
   return redirect(`${back}?c=${flag || moderation ? 'commented_mod' : 'commented'}`);
+}
+
+// 通知页：仅登录用户可见；打开即把全部通知标为已读（列表里本次仍按未读样式区分显示）
+async function notificationsPage(env, request) {
+  const settings = await getSettings(env);
+  const user = await currentUser(env, request);
+  if (!user) return redirect('/login?next=/notifications');
+  const { results } = await env.DB.prepare(
+    'SELECT id, type, memo_id, actor, excerpt, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 50'
+  ).bind(user.id).all();
+  const rows = results || [];
+  await env.DB.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0').bind(user.id).run();
+  const items = rows.map((n) => {
+    const verb = n.type === 'reply' ? '回复了你' : '评论了你的动态';
+    return `<a class="ntf${n.is_read ? '' : ' unread'}" href="/memo/${n.memo_id}">
+      <span class="ntf-dot"></span>
+      <span class="ntf-main"><b>${escapeXml(n.actor)}</b> ${verb}：${escapeXml(n.excerpt)}</span>
+      <span class="ntf-when">${timeAgo(n.created_at)}</span>
+    </a>`;
+  }).join('');
+  const body = `<div class="feed-box"><div class="ntf-head">🔔 通知提醒</div>${items || '<div class="memo">暂时没有通知。有人回复你的评论、或评论你发的动态时，会出现在这里。</div>'}</div>
+    <div class="pager"><a href="/">← 回到时间线</a></div>`;
+  return htmlResponse(layout(await withUsage(env, settings), { title: `通知 · ${settings.site_name}`, body, user, notifCount: 0 }));
 }
 
 async function feed(env) {
@@ -524,6 +553,7 @@ export default {
         return method === 'GET' ? admin.userLoginPage(env, url) : admin.userLoginPost(env, request);
       }
       if (path === '/logout' && method === 'GET') return admin.userLogout(env, request);
+      if (path === '/notifications' && method === 'GET') return notificationsPage(env, request);
       if (path === '/post/new') {
         return method === 'GET' ? admin.userPostPage(env, request, null) : admin.userPostSave(env, request, null);
       }

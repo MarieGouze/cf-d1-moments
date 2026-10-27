@@ -2,7 +2,7 @@
 import { sha256Hex, randomToken, nowSec } from './utils.js';
 
 // 版本号（2026-10-26 用户定）：三段式 2.中.尾——增减功能递增中段、尾段归零；修 bug 只递增尾段。
-export const VERSION = '2.12.4';
+export const VERSION = '2.13.0';
 
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS memos (
@@ -78,8 +78,20 @@ const CREATE_STATEMENTS = [
     last_geo TEXT NOT NULL DEFAULT '',
     last_ua TEXT NOT NULL DEFAULT ''
   )`,
+  `CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    type TEXT NOT NULL DEFAULT 'reply',
+    memo_id INTEGER NOT NULL DEFAULT 0,
+    comment_id INTEGER NOT NULL DEFAULT 0,
+    actor TEXT NOT NULL DEFAULT '',
+    excerpt TEXT NOT NULL DEFAULT '',
+    is_read INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_memos_created ON memos(created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_comments_memo ON comments(memo_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, is_read, id)`,
 ];
 
 export const DEFAULT_SETTINGS = {
@@ -308,6 +320,43 @@ export function userCookie(token) {
 export const clearUserCookie = 'mm_user=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
 
 export const clearSessionCookie = 'mm_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
+
+// ---------- 通知提醒（注册用户被回复 / 投稿被评论） ----------
+// 一条已通过审核的评论产生通知的时机有二：发表时即通过（发表处调用）、
+// 或先待审后由管理员通过（审核处调用，按 comment_id 去重，不会重复发）。
+export async function notifyForComment(env, c) {
+  try {
+    if (!c || !c.id || !c.memo_id) return;
+    const recipients = new Map(); // user_id -> type
+    // 1) 被回复的人：reply_to 是评论里记下的被回复者昵称，能对上注册用户才通知
+    if (c.reply_to && c.reply_to !== c.name) {
+      const u = await env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(c.reply_to).first();
+      if (u) recipients.set(u.id, 'reply');
+    }
+    // 2) 投稿作者：有人评论了我发的动态（与被回复的是同一人时只发一条，按回复计）
+    const memo = await env.DB.prepare('SELECT author_id FROM memos WHERE id = ?').bind(c.memo_id).first();
+    if (memo && memo.author_id > 0 && !recipients.has(memo.author_id)) {
+      const au = await env.DB.prepare('SELECT id, username FROM users WHERE id = ?').bind(memo.author_id).first();
+      if (au && au.username !== c.name) recipients.set(au.id, 'comment');
+    }
+    const excerpt = String(c.content || '').slice(0, 60);
+    const now = nowSec();
+    for (const [uid, type] of recipients) {
+      await env.DB.prepare(
+        'INSERT INTO notifications (user_id, type, memo_id, comment_id, actor, excerpt, created_at) ' +
+        'SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM notifications WHERE user_id = ? AND comment_id = ?)'
+      ).bind(uid, type, c.memo_id, c.id, String(c.name || ''), excerpt, now, uid, c.id).run();
+    }
+  } catch { /* 通知失败不影响评论本身 */ }
+}
+
+export async function unreadNotifCount(env, userId) {
+  if (!userId) return 0;
+  try {
+    const r = await env.DB.prepare('SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND is_read = 0').bind(userId).first();
+    return r ? r.c : 0;
+  } catch { return 0; }
+}
 
 // ---------- 全站访问密码（密码门） ----------
 // 访客输对密码后下发 mm_gate cookie，值为 settings.site_gate_token；

@@ -141,6 +141,15 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .cmt-form .ao-check input{width:auto;padding:0;margin:0}
 .ao-tag{font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:0 5px;margin-left:6px;white-space:nowrap}
 .ao-hidden{color:#d97706;font-weight:600}
+.bell{position:relative;font-size:15px}
+.nbadge{position:absolute;top:-2px;right:-6px;background:#e5484d;color:#fff;font-size:10px;font-weight:700;line-height:1;padding:2px 5px;border-radius:999px;min-width:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.35)}
+.ntf-head{font-size:16px;font-weight:700;padding:10px 0 6px}
+.ntf{display:flex;align-items:baseline;gap:8px;padding:10px 2px;border-bottom:1px dashed var(--line);color:var(--text);font-size:14px;text-decoration:none}
+.ntf:last-child{border-bottom:0}
+.ntf-dot{flex:0 0 8px;width:8px;height:8px;border-radius:50%;background:transparent;position:relative;top:-1px}
+.ntf.unread .ntf-dot{background:#e5484d}
+.ntf-main{flex:1;word-break:break-word}
+.ntf-when{flex:none;color:var(--sub);font-size:12px;white-space:nowrap}
 .tb-link{font-size:13px;color:var(--sub);text-decoration:none;padding:6px 4px;white-space:nowrap}
 .tb-link:hover{color:var(--text)}
 .tb-user{font-size:13px;color:var(--text);padding:6px 2px;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis}
@@ -558,7 +567,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
   </article>`;
 }
 
-export function layout(settings, { title, body, activeTag = '', adminView = false, user = null }) {
+export function layout(settings, { title, body, activeTag = '', adminView = false, user = null, notifCount = 0 }) {
   const coverStyle = settings.cover_url
     ? `style="background-image:url('${esc(settings.cover_url)}')"`
     : '';
@@ -595,7 +604,7 @@ export function layout(settings, { title, body, activeTag = '', adminView = fals
     <span id="tag-chips"></span>
     <span class="spacer"></span>
     ${!adminView ? (user
-      ? `${settings.users_can_post === '1' ? '<a class="tb-btn" href="/post/new" title="发布动态" aria-label="发布动态"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></a>' : ''}<span class="tb-user">${user.avatar ? `<img src="${esc(user.avatar)}" alt="" style="width:20px;height:20px;border-radius:50%;vertical-align:-5px;margin-right:4px">` : '👤 '}${esc(user.username)}</span><a class="tb-link" href="/logout">退出</a>`
+      ? `${settings.users_can_post === '1' ? '<a class="tb-btn" href="/post/new" title="发布动态" aria-label="发布动态"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></a>' : ''}<a class="tb-link bell" href="/notifications" title="通知提醒" aria-label="通知提醒">🔔${notifCount ? `<span class="nbadge">${notifCount > 99 ? '99+' : notifCount}</span>` : ''}</a><span class="tb-user">${user.avatar ? `<img src="${esc(user.avatar)}" alt="" style="width:20px;height:20px;border-radius:50%;vertical-align:-5px;margin-right:4px">` : '👤 '}${esc(user.username)}</span><a class="tb-link" href="/logout">退出</a>`
       : `<a class="tb-link" href="/login">登录</a>${settings.registration_open === '1' ? '<a class="tb-link" href="/register">注册</a>' : ''}`) : ''}
     ${adminView ? '<a class="tb-btn" href="/admin/memos/new" title="发布" aria-label="发布"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></a><a class="tb-btn" href="/admin/logout" title="退出" aria-label="退出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12v.01"/><path d="M13 4.6v15.6a1 1 0 0 1-1.2 1L5 20V5.6a2 2 0 0 1 1.5-1.9l4-1A2 2 0 0 1 13 4.6Z"/></svg></a>' : ''}
   </div>

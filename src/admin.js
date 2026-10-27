@@ -4,6 +4,7 @@ import {
   getSettings, setSetting, createSession, destroySession, isAdmin,
   sessionCookie, clearSessionCookie, parseTags, parseJsonSafe, effectiveAdminHash, gateCookie,
   createUserSession, destroyUserSession, userCookie, clearUserCookie, currentUser, randomAvatar,
+  notifyForComment, unreadNotifCount,
 } from './db.js';
 import { layout } from './render.js';
 import { sha256Hex, randomToken, nowSec, escapeHtml as esc, htmlResponse, redirect, clientIp, parseCookies, verifyCaptcha } from './utils.js';
@@ -1035,7 +1036,6 @@ export async function userPostPage(env, request, id) {
     <form method="post" action="${id ? `/post/${id}/edit` : '/post/new'}">
       <input name="title" maxlength="80" placeholder="标题（可选）" value="${esc(memo.title || '')}" style="${inp}">
       <textarea name="content_md" rows="8" placeholder="写点什么…（支持 Markdown）" style="${inp}">${esc(memo.content_md || '')}</textarea>
-      <input name="tags" placeholder="标签，逗号分隔（可选）" value="${esc(memo.tags || '')}" style="${inp}">
       <div style="margin:2px 0 8px;font-size:14px">上传图片 / 压缩包（单个 ≤500KB）：<input type="file" accept="image/*,.zip,.rar,.7z,.tar,.gz,.tgz,.bz2,.xz" onchange="upFile(this)"></div>
       <div id="media-box"></div>
       <input type="hidden" name="media_json" id="media_json" value="[]">
@@ -1075,7 +1075,8 @@ function upFile(input){
 renderMedia();
     </script>
   </div>`;
-  return htmlResponse(layout(g.s, { title: (id ? '编辑动态' : '发布动态') + ' · ' + g.s.site_name, body, user: g.user }));
+  const notifCount = g.user ? await unreadNotifCount(env, g.user.id) : 0;
+  return htmlResponse(layout(g.s, { title: (id ? '编辑动态' : '发布动态') + ' · ' + g.s.site_name, body, user: g.user, notifCount }));
 }
 
 function cleanUserMedia(raw) {
@@ -1097,7 +1098,7 @@ export async function userPostSave(env, request, id) {
   const title = String(f.get('title') || '').trim().slice(0, 80);
   const content = String(f.get('content_md') || '').trim();
   const media = cleanUserMedia(f.get('media_json'));
-  const tags = parseTags(f.get('tags')).join(',');
+  // 用户发布无标签栏：新投稿 tags 恒为空，编辑时保留原有标签不动；表单伪造 tags 一律无视
   if (!content && parseJsonSafe(media, []).length === 0) {
     return redirect(id ? `/post/${id}/edit` : '/post/new');
   }
@@ -1105,10 +1106,11 @@ export async function userPostSave(env, request, id) {
   if (id) {
     const m = await env.DB.prepare('SELECT author_id FROM memos WHERE id = ?').bind(id).first();
     if (!m || m.author_id !== g.user.id) return redirect('/');
-    await env.DB.prepare('UPDATE memos SET title=?, content_md=?, tags=?, media=?, updated_at=? WHERE id=?')
-      .bind(title, content, tags, media, now, id).run();
+    await env.DB.prepare('UPDATE memos SET title=?, content_md=?, media=?, updated_at=? WHERE id=?')
+      .bind(title, content, media, now, id).run();
     return redirect(`/memo/${id}`);
   }
+  const tags = '';
   const ins = await env.DB.prepare(
     'INSERT INTO memos (title, content_md, tags, media, ext_type, ext_data, pinned, hidden, files_gated, content_gated, comments_members_only, members_only, view_password_hash, author_id, author_name, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
   ).bind(title, content, tags, media, '', '{}', 0, 0, 0, 0, 0, 0, '', g.user.id, g.user.username, now, now).run();
@@ -1184,6 +1186,9 @@ export async function commentsPage(env, url) {
 export async function commentAction(env, request, id, action) {
   if (action === 'approve') {
     await env.DB.prepare("UPDATE comments SET status='approved', flag='' WHERE id = ?").bind(id).run();
+    // 待审评论通过后补发通知（发表时即通过的已发过，按 comment_id 去重不会重复）
+    const c = await env.DB.prepare('SELECT id, memo_id, parent_id, reply_to, name, content FROM comments WHERE id = ?').bind(id).first();
+    if (c) await notifyForComment(env, c);
   } else if (action === 'spam') {
     await env.DB.prepare("UPDATE comments SET flag='spam' WHERE id = ?").bind(id).run();
   } else if (action === 'hide') {
@@ -1198,6 +1203,7 @@ export async function commentAction(env, request, id, action) {
       await toTrash(env, 'comment', id, `${c.name}：${String(c.content || '').slice(0, 60)}`, { comment: c });
     }
     await env.DB.prepare('DELETE FROM comments WHERE id = ?').bind(id).run();
+    await env.DB.prepare('DELETE FROM notifications WHERE comment_id = ?').bind(id).run();
     await purgeTrash(env);
     // 从前台动态页删的，删完回原页面；从后台审核页删的，回审核页
     try {
