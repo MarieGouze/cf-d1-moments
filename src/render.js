@@ -105,12 +105,12 @@ a{color:var(--accent);text-decoration:none}
 .ext-card .d{font-size:12px;color:var(--sub);margin-top:3px}
 .tags{margin:8px 0 2px;display:flex;gap:6px;flex-wrap:wrap}
 .tag{font-size:12px;color:var(--accent);border:1px solid var(--line);padding:2px 8px;border-radius:999px}
-.m-foot{margin:10px 0 4px 52px;display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;color:var(--sub);font-size:13px}
+.m-foot{margin:10px 0 4px 52px;display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;color:var(--sub);font-size:13px}
 .m-foot .time{color:var(--sub);white-space:nowrap}
 .m-foot .spacer{flex:1}
 .m-foot>a{white-space:nowrap}
 .m-foot form{flex:none}
-.act{background:none;border:0;color:var(--sub);font-size:13px;cursor:pointer;padding:2px 4px;white-space:nowrap;flex:none}
+.act{background:none;border:0;color:var(--sub);font-size:13px;cursor:pointer;padding:2px 3px;white-space:nowrap;flex:none}
 .act.liked{color:#e05252}
 .cmt-box{margin:8px 0 6px 52px;border-radius:10px;padding:4px 2px;font-size:14px}
 .cmt{padding:4px 0;border-bottom:1px dashed var(--line)}
@@ -187,6 +187,8 @@ svg.cmt-ava .fg{fill:var(--sub)}
   .m-content img{height:200px}
   .m-body,.m-foot,.cmt-box,.cmt-form,.cmt-lines{margin-left:0}
   .memo-head .m-avatar{display:none}
+  .m-foot{flex-wrap:nowrap;gap:6px 7px;font-size:12.5px}
+  .m-foot .act{font-size:12.5px;padding:2px 1px}
 }
 `;
 
