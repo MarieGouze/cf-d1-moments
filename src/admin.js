@@ -28,6 +28,10 @@ a{color:#576b95;text-decoration:none}
 .ok{background:#e9f7e9;border:1px solid #bfe3bf;color:#1c5c1c;border-radius:10px;padding:10px 14px;margin:12px 0;font-size:14px}
 table{width:100%;border-collapse:collapse;font-size:14px}
 td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+@media (max-width:640px){
+  .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{width:max-content;min-width:100%}
+}
 .hint{font-size:12px;color:#888}
 .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0}
 .thumbs .th{position:relative;width:76px;height:76px;border-radius:8px;overflow:hidden;background:#eee}
@@ -419,7 +423,13 @@ function memoForm(memo, settings) {
     </div>
     <label>发布时间（可改：设为未来时间 = 定时发布，到点前游客看不到）</label>
     <input type="datetime-local" name="created_at" value="${toLocalInput(memo.created_at)}">
-    <label style="display:block;margin:8px 0"><input type="checkbox" name="pinned" value="1" style="width:auto" ${memo.pinned ? 'checked' : ''}> 置顶</label>
+    <label style="display:block;margin:8px 0">星标置顶（三颗星最高，多条同星时新的在前）
+      <select name="pinned">
+        <option value="0" ${!memo.pinned ? 'selected' : ''}>不置顶</option>
+        <option value="1" ${memo.pinned === 1 ? 'selected' : ''}>⭐ 一星置顶</option>
+        <option value="2" ${memo.pinned === 2 ? 'selected' : ''}>⭐⭐ 两星置顶</option>
+        <option value="3" ${memo.pinned === 3 ? 'selected' : ''}>⭐⭐⭐ 三星置顶（最高）</option>
+      </select></label>
     <label style="display:block;margin:8px 0"><input type="checkbox" name="hidden" value="1" style="width:auto" ${memo.hidden ? 'checked' : ''}> 隐藏（仅自己在登录状态下可见，游客看不到）</label>
     <label style="display:block;margin:8px 0"><input type="checkbox" name="files_gated" value="1" style="width:auto" ${memo.files_gated ? 'checked' : ''}> 附件文件回复后可见（游客在这条动态下评论后，才能看到下载文件；图片、视频不受影响）</label>
     <label style="display:block;margin:8px 0"><input type="checkbox" name="content_gated" value="1" style="width:auto" ${memo.content_gated ? 'checked' : ''}> 正文回复后可见（游客评论后才能看正文、图片和附件；标题照常显示，勾了这个就不必再勾上一项）</label>
@@ -574,7 +584,7 @@ export async function dashboard(env) {
       const hid = m.hidden ? ' <span class="hint">（🔒 隐藏）</span>' : '';
       const text = esc(excerptOf(m.content_md, 60)) || '<span class="hint">（无文字）</span>';
       const author = m.author_id ? ` <span class="hint">（投稿：${esc(m.author_name)}）</span>` : '';
-      return `<tr><td>${m.pinned ? '📌 ' : ''}${text}${future}${hid}${author}<div class="hint">${new Date((m.created_at + 28800) * 1000).toISOString().slice(0, 16).replace('T', ' ')} · ❤ ${m.like_count} · 💬 ${m.cc}${m.pc ? `（待审 ${m.pc}）` : ''}</div></td>
+      return `<tr><td>${m.pinned ? '⭐'.repeat(m.pinned) + ' ' : ''}${text}${future}${hid}${author}<div class="hint">${new Date((m.created_at + 28800) * 1000).toISOString().slice(0, 16).replace('T', ' ')} · ❤ ${m.like_count} · 💬 ${m.cc}${m.pc ? `（待审 ${m.pc}）` : ''}</div></td>
       <td style="white-space:nowrap"><a href="/admin/memos/${m.id}/edit">编辑</a>
       <form method="post" action="/admin/memos/${m.id}/delete" style="display:inline" onsubmit="return confirm('删除这条动态？评论和点赞也会一起删。')"><button class="btn danger" style="padding:4px 10px">删除</button></form></td></tr>`;
     })
@@ -609,7 +619,7 @@ export async function memoSave(env, request, id) {
   const media = String(f.get('media_json') || '[]');
   const tags = parseTags(f.get('tags')).join(',');
   const ext = buildExt(String(f.get('ext_type') || ''), f);
-  const pinned = f.get('pinned') ? 1 : 0;
+  const pinned = Math.min(3, Math.max(0, parseInt(f.get('pinned') || '0', 10) || 0));
   const hiddenPost = f.get('hidden') ? 1 : 0;
   const filesGated = f.get('files_gated') ? 1 : 0;
   const contentGated = f.get('content_gated') ? 1 : 0;

@@ -521,7 +521,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     <div class="memo-head">
       <div class="${cardAvatarCls}" ${cardAvatarStyle}>${cardAvatarInner}</div>
       <div>
-        <div class="m-nick">${cardNick}${memo.pinned ? '<span class="pin">📌 置顶</span>' : ''}${memo.hidden && isAdmin ? '<span class="pin" style="color:#999">🔒 隐藏</span>' : ''}${memo.view_password_hash && isAdmin ? '<span class="pin">🔑 密码</span>' : ''}${memo.members_only && isAdmin ? '<span class="pin">👥 仅注册用户</span>' : ''}</div>
+        <div class="m-nick">${cardNick}${memo.pinned ? `<span class="pin">${'⭐'.repeat(memo.pinned)} 置顶</span>` : ''}${memo.hidden && isAdmin ? '<span class="pin" style="color:#999">🔒 隐藏</span>' : ''}${memo.view_password_hash && isAdmin ? '<span class="pin">🔑 密码</span>' : ''}${memo.members_only && isAdmin ? '<span class="pin">👥 仅注册用户</span>' : ''}</div>
       </div>
     </div>
     <div class="m-body">
