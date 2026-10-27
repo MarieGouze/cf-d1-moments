@@ -66,7 +66,7 @@ a{color:var(--accent);text-decoration:none}
 [data-theme="dark"] .head-box .tb-btn.on{color:#fff;box-shadow:inset 0 -2px 0 #fff}
 .feed-box{position:relative;z-index:2;background:var(--card);border-radius:0 0 16px 16px;box-shadow:0 -8px 22px rgba(27,35,51,.10), var(--shadow);border-top:1px solid var(--line-strong);padding:8px 16px;margin:-14px 0 0}
 .memo{background:transparent;border-radius:0;box-shadow:none;padding:12px 0 8px;margin:0}
-.memo-head{display:flex;gap:10px}
+.memo-head{display:flex;gap:10px;align-items:center}
 .memo-head .m-avatar{flex:0 0 42px;width:42px;height:42px;border-radius:8px;background:#cfd4dd center/cover no-repeat}
 .memo-head .m-avatar-fallback{display:flex;align-items:center;justify-content:center;color:#fff;background:#7a8494;font-size:18px}
 .m-nick{color:var(--accent);font-weight:600;font-size:15px}
@@ -545,7 +545,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       ${detail ? '' : `<a href="/memo/${memo.id}" style="color:var(--sub)">详情</a>`}
       ${isAdmin ? `<a class="act" href="/admin/memos/${memo.id}/edit" style="text-decoration:none">✏️ 编辑</a>` : ''}
       ${isAdmin ? `<form method="post" action="/admin/memos/${memo.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条动态？评论和点赞会一并移入垃圾桶。')"><button class="act" type="submit" style="color:#e5484d">&#x1F5D1;&#xFE0E; 删除</button></form>` : ''}
-      ${user && settings.users_can_post === '1' && memo.author_id === user.id ? `<a class="act" href="/post/${memo.id}/edit" style="text-decoration:none">✏️ 编辑</a><form method="post" action="/post/${memo.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条动态？评论和点赞会一并移入垃圾桶。')"><button class="act" type="submit" style="color:#e5484d">&#x1F5D1;&#xFE0E; 删除</button></form>` : ''}
+      ${!isAdmin && user && settings.users_can_post === '1' && memo.author_id === user.id ? `<a class="act" href="/post/${memo.id}/edit" style="text-decoration:none">✏️ 编辑</a><form method="post" action="/post/${memo.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条动态？评论和点赞会一并移入垃圾桶。')"><button class="act" type="submit" style="color:#e5484d">&#x1F5D1;&#xFE0E; 删除</button></form>` : ''}
       <span class="spacer"></span>
       ${locked ? '' : `<button class="act${liked ? ' liked' : ''}" onclick="likeMemo(${memo.id},this)">❤ <span class="lc">${memo.like_count || 0}</span></button>
       ${(detail || isAdmin)
