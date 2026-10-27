@@ -186,7 +186,7 @@ svg.cmt-ava .fg{fill:var(--sub)}
   .hero{height:168px}
   .m-content img{height:200px}
   .m-body,.m-foot,.cmt-box,.cmt-form,.cmt-lines{margin-left:0}
-  .memo-head .m-avatar{display:none}
+  .memo-head .m-avatar{flex:0 0 26px;width:26px;height:26px;border-radius:7px;font-size:13px}
   .m-foot{flex-wrap:nowrap;gap:6px 7px;font-size:12.5px}
   .m-foot .act{font-size:12.5px;padding:2px 1px}
 }
