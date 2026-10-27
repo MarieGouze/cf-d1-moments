@@ -482,7 +482,7 @@ export default {
         });
       }
       if ((path === '/favicon.png' || path === '/favicon.ico') && method === 'GET') {
-        return mediaGet(env, 'site/favicon.png');
+        return mediaGet(env, ctx, request, 'site/favicon.png');
       }
       if (path.startsWith('/media/') && method === 'GET') {
         return mediaGet(env, ctx, request, decodeURIComponent(path.slice('/media/'.length)));
