@@ -82,8 +82,7 @@ a{color:var(--accent);text-decoration:none}
 .m-content pre code{background:none;padding:0}
 .m-content blockquote{margin:8px 0;padding:4px 12px;border-left:3px solid var(--line);color:var(--sub)}
 .m-content a{text-decoration:underline}
-.more-row{text-align:right;margin:2px 0 0}
-.m-content a.more-link{text-decoration:none}
+.m-content a.more-link{text-decoration:none;white-space:nowrap}
 .grid{display:grid;gap:6px;margin:8px 0 4px;max-width:420px}
 .grid img,.grid video{width:100%;height:100%;object-fit:cover;border-radius:6px;display:block;aspect-ratio:1/1}
 .grid.g1{max-width:360px}
@@ -424,7 +423,7 @@ function extBlock(memo) {
 function contentHtml(memo, detail) {
   const plain = excerptOf(memo.content_md, 1000000);
   if (!detail && plain.length > 120) {
-    return `<p>${esc(plain.slice(0, 120))}…</p><p class="more-row"><a class="more-link" href="/memo/${memo.id}">更多…</a></p>`;
+    return `<p>${esc(plain.slice(0, 120))}… <a class="more-link" href="/memo/${memo.id}">更多…</a></p>`;
   }
   return renderContent(memo.content_md);
 }
