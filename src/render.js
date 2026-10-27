@@ -292,6 +292,8 @@ function insertEmoji(memoId, btn){
   try{ ta.setSelectionRange(pos,pos); }catch(err){}
 }
 function cancelReply(memoId){
+  var wrap=document.getElementById('cmt-form-'+memoId);
+  if(wrap) wrap.classList.remove('open');
   var form=document.querySelector('#cmt-form-'+memoId+' form');
   if(!form) return;
   form.querySelector('input[name=parent_id]').value='0';
