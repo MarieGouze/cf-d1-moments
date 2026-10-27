@@ -105,10 +105,12 @@ a{color:var(--accent);text-decoration:none}
 .ext-card .d{font-size:12px;color:var(--sub);margin-top:3px}
 .tags{margin:8px 0 2px;display:flex;gap:6px;flex-wrap:wrap}
 .tag{font-size:12px;color:var(--accent);border:1px solid var(--line);padding:2px 8px;border-radius:999px}
-.m-foot{margin:10px 0 4px 52px;display:flex;align-items:center;gap:14px;color:var(--sub);font-size:13px}
-.m-foot .time{color:var(--sub)}
+.m-foot{margin:10px 0 4px 52px;display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;color:var(--sub);font-size:13px}
+.m-foot .time{color:var(--sub);white-space:nowrap}
 .m-foot .spacer{flex:1}
-.act{background:none;border:0;color:var(--sub);font-size:13px;cursor:pointer;padding:2px 4px}
+.m-foot>a{white-space:nowrap}
+.m-foot form{flex:none}
+.act{background:none;border:0;color:var(--sub);font-size:13px;cursor:pointer;padding:2px 4px;white-space:nowrap;flex:none}
 .act.liked{color:#e05252}
 .cmt-box{margin:8px 0 6px 52px;border-radius:10px;padding:4px 2px;font-size:14px}
 .cmt{padding:4px 0;border-bottom:1px dashed var(--line)}
