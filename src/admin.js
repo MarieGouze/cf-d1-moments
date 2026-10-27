@@ -852,7 +852,7 @@ export async function userRegisterPage(env, url) {
   }
   const err = url.searchParams.get('e');
   const next = safeNext(url.searchParams.get('next'));
-  const errs = { captcha: '验证码不对，请重新填写。', name: '用户名要 2~16 个字，且不能带链接等内容。', taken: '这个用户名已经被注册了，换一个试试。', pw: '密码至少 6 位，且两次输入要一致。', many: '同一网络今天注册的账号太多了，请明天再试。' };
+  const errs = { captcha: '验证码不对，请重新填写。', name: '用户名要 2~16 个字，且不能带链接等内容。', taken: '这个用户名已经被注册了，换一个试试。', mislead: '这个用户名含有容易让人误会的词（像管理员、官方、admin 之类），换一个试试。', pw: '密码至少 6 位，且两次输入要一致。', many: '同一网络今天注册的账号太多了，请明天再试。' };
   return page('注册', `<div class="card"><h1>📝 注册账号</h1>
     ${err && errs[err] ? `<div class="err">${errs[err]}</div>` : ''}
     <form method="post" action="/register">
@@ -877,7 +877,16 @@ export async function userRegisterPost(env, request) {
   if (!(await verifyCaptcha(s.site_secret, cookies.mm_captcha, form.get('captcha')))) return back('captcha');
   const username = String(form.get('username') || '').replace(/["'<>]/g, '').trim();
   if (username.length < 2 || username.length > 16 || /https?:|www\.|\.com|\.cn|\.net/i.test(username)) return back('name');
-  if (username === String(s.nickname || '').trim()) return back('taken');
+  // 站长昵称任何人不得占用：英文大小写视为同一个名字（taoge / TAOGE / TaoGe 都算占用）
+  if (username.toLowerCase() === String(s.nickname || '').trim().toLowerCase()) return back('taken');
+  // 不得使用会让其他用户产生误导的用词（冒充管理/官方身份的词，含英文、忽略大小写、子串匹配）
+  const MISLEAD_WORDS = [
+    '管理', '站长', '官方', '官网', '公告', '通知', '系统', '客服', '版主', '审核',
+    '运营', '站务', '站方', '认证', '小助手', '管家', '网管', '机器人', '平台',
+    'admin', 'official', 'system', 'root', 'moderator', 'webmaster', 'gamemaster',
+    'sysop', 'operator', 'support', 'staff', 'manager', 'helpdesk', 'service',
+  ];
+  if (MISLEAD_WORDS.some((w) => username.toLowerCase().includes(w))) return back('mislead');
   const pw = String(form.get('password') || '');
   const pw2 = String(form.get('password2') || '');
   if (pw.length < 6 || pw.length > 64 || pw !== pw2) return back('pw');

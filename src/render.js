@@ -173,7 +173,7 @@ svg.cmt-ava .fg{fill:var(--sub)}
 [data-theme="dark"] .gh-ico{filter:invert(1)}
 .foot-gh:hover{text-decoration:underline}
 .foot-note .admin-link:hover{text-decoration:underline}
-.marquee{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:14px;color:var(--text)}
+.marquee{display:flex;align-items:center;gap:8px;padding:10px 16px 10px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--text)}
 .mq-ico{flex:none}
 .mq-track{flex:1;overflow:hidden;white-space:nowrap}
 .mq-text{display:inline-block;padding-left:100%;animation:mqscroll linear infinite;font-weight:700}
