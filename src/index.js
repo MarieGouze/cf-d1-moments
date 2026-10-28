@@ -1,6 +1,6 @@
 // cf-d1-moments：极简朋友圈（仿 kingwrcy/moments 版面，Cloudflare Workers + D1 + R2 重写）
 import { initDb, getSettings, isAdmin, gateCookieOk, currentUser, notifyForComment, unreadNotifCount } from './db.js';
-import { layout, memoCard, tagChipsScript, linksBlock, pagerHtml, noticeHtml, timeAgo } from './render.js';
+import { layout, memoCard, linksBlock, pagerHtml, noticeHtml, timeAgo } from './render.js';
 import * as admin from './admin.js';
 import {
   htmlResponse, redirect, nowSec, sha256Hex, clientIp, parseCookies,
@@ -45,22 +45,6 @@ async function likedSet(env, request, memoIds) {
     `SELECT memo_id FROM likes WHERE ip_hash = ? AND memo_id IN (${memoIds.map(() => '?').join(',')})`
   ).bind(ipHash, ...memoIds).all();
   return new Set((results || []).map((r) => r.memo_id));
-}
-
-async function allTags(env, adminView) {
-  const now = nowSec();
-  const sql = adminView
-    ? "SELECT tags FROM memos WHERE tags != ''"
-    : "SELECT tags FROM memos WHERE tags != '' AND created_at <= ? AND hidden = 0";
-  const stmt = adminView ? env.DB.prepare(sql) : env.DB.prepare(sql).bind(now);
-  const { results } = await stmt.all();
-  const map = new Map();
-  for (const r of results || []) {
-    for (const t of String(r.tags).split(',').map((x) => x.trim()).filter(Boolean)) {
-      map.set(t, (map.get(t) || 0) + 1);
-    }
-  }
-  return [...map.entries()].map(([tag, c]) => ({ tag, c })).sort((a, b) => b.c - a.c).slice(0, 20);
 }
 
 // ---------------- R2 用量监控 ----------------
@@ -199,10 +183,9 @@ async function homePage(env, request, url, { tag = '' } = {}) {
   const { memos, hasMore } = await listMemos(env, { page, tag, adminView });
   // 点赞/解锁/标签/每条动态的评论原本逐个串行查（一页 10 条就是十几趟），改为全部并行
   const ids = memos.map((m) => m.id);
-  const [liked, unlocked, tags, viewOk] = await Promise.all([
+  const [liked, unlocked, viewOk] = await Promise.all([
     likedSet(env, request, ids),
     unlockedSet(env, request, ids, adminView),
-    allTags(env, adminView),
     Promise.all(memos.map((m) => viewUnlocked(env, request, m, settings, adminView))),
   ]);
   const mLocked = memos.map((m) => !!(m.members_only && !adminView && !user));
@@ -210,8 +193,9 @@ async function homePage(env, request, url, { tag = '' } = {}) {
     memos.map((m, i) => (viewOk[i] && !mLocked[i] ? approvedComments(env, m.id, 500, adminView) : Promise.resolve([])))
   );
   const userAvatars = await avatarMapFor(env, commentsList.flat());
+  const dlCounts = await downloadCounts(env, memos);
   const cards = memos.map((m, i) =>
-    memoCard(m, settings, { comments: commentsList[i], liked: liked.has(m.id), isAdmin: adminView, user, userAvatars, filesUnlocked: unlocked.has(m.id), pwLocked: !viewOk[i], membersLocked: mLocked[i] })
+    memoCard(m, settings, { comments: commentsList[i], liked: liked.has(m.id), isAdmin: adminView, user, userAvatars, filesUnlocked: unlocked.has(m.id), pwLocked: !viewOk[i], membersLocked: mLocked[i], dlCounts })
   );
   const base = tag ? `/tag/${encodeURIComponent(tag)}` : '/';
   const announce = (settings.announce_text || '').trim();
@@ -222,8 +206,7 @@ async function homePage(env, request, url, { tag = '' } = {}) {
     ${noticeHtml(url.searchParams.get('c'))}
     ${tag ? `<div class="notice">正在看标签 <b>#${escapeXml(tag)}</b> 的动态，<a href="/">看全部</a></div>` : ''}
     <div class="feed-box">${mq}${cards.join('<div class="memo-sep"></div>') || '<div class="memo">还没有动态。</div>'}${linksBlock(settings)}</div>
-    ${pagerHtml(page, hasMore, base)}
-    ${tagChipsScript(tags, tag)}`;
+    ${pagerHtml(page, hasMore, base)}`;
   const notifCount = user ? await unreadNotifCount(env, user.id) : 0;
   return htmlResponse(layout(await withUsage(env, settings), { title: tag ? `#${tag} · ${settings.site_name}` : settings.site_name, body, activeTag: tag, adminView, user, notifCount }));
 }
@@ -257,7 +240,8 @@ async function memoDetail(env, request, id) {
     }
   }
   const userAvatars = await avatarMapFor(env, comments);
-  const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, user, userAvatars, filesUnlocked: unlocked.has(id), pwLocked: !viewOk, membersLocked, unlockErr })}</div>
+  const dlCounts = await downloadCounts(env, [memo]);
+  const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, user, userAvatars, filesUnlocked: unlocked.has(id), pwLocked: !viewOk, membersLocked, unlockErr, dlCounts })}</div>
     <div class="pager"><a href="/">← 回到时间线</a></div>`;
   const pageTitle = memo.title || (viewOk && !membersLocked ? plainTextExcerpt(memo.content_md, 40) : '') || settings.site_name;
   const notifCount = user ? await unreadNotifCount(env, user.id) : 0;
@@ -408,6 +392,49 @@ async function notificationsPage(env, request) {
   return htmlResponse(layout(await withUsage(env, settings), { title: `通知 · ${settings.site_name}`, body, user, notifCount: 0 }));
 }
 
+// 附件下载：经 /dl/<key> 下载时计数一次（直链 /media 不计数），并强制以附件形式下载
+async function dlGet(env, key) {
+  if (!key || key.includes('..')) return new Response('Not Found', { status: 404 });
+  const obj = await env.MEDIA.get(key);
+  if (!obj) return new Response('Not Found', { status: 404 });
+  try {
+    await env.DB.prepare(
+      'INSERT INTO downloads (file_key, cnt, updated_at) VALUES (?, 1, ?) ON CONFLICT(file_key) DO UPDATE SET cnt = cnt + 1, updated_at = excluded.updated_at'
+    ).bind(key, nowSec()).run();
+  } catch { /* 计数失败不影响下载 */ }
+  const headers = new Headers();
+  obj.writeHttpMetadata(headers);
+  headers.set('ETag', obj.httpEtag);
+  const name = key.split('/').pop() || 'file';
+  headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`);
+  headers.set('Cache-Control', 'private, no-store');
+  return new Response(obj.body, { headers });
+}
+
+// 一批动态里全部上传附件的下载次数映射（file_key -> 次数），供附件卡片显示
+async function downloadCounts(env, memos) {
+  const keys = new Set();
+  for (const m of memos || []) {
+    let media = [];
+    try { media = JSON.parse(m.media || '[]'); } catch { media = []; }
+    for (const it of media) {
+      if (it && it.type === 'file' && typeof it.url === 'string' && it.url.startsWith('/media/uploads/')) {
+        keys.add(it.url.slice('/media/'.length));
+      }
+    }
+  }
+  const map = {};
+  if (!keys.size) return map;
+  const arr = [...keys];
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT file_key, cnt FROM downloads WHERE file_key IN (${arr.map(() => '?').join(',')})`
+    ).bind(...arr).all();
+    for (const r of results || []) map[r.file_key] = r.cnt;
+  } catch { /* 表未就绪时按 0 次显示 */ }
+  return map;
+}
+
 async function feed(env) {
   const settings = await getSettings(env);
   const { memos } = await listMemos(env, { page: 1 });
@@ -486,6 +513,9 @@ export default {
       }
       if (path.startsWith('/media/') && method === 'GET') {
         return mediaGet(env, ctx, request, decodeURIComponent(path.slice('/media/'.length)));
+      }
+      if (path.startsWith('/dl/') && method === 'GET') {
+        return dlGet(env, decodeURIComponent(path.slice('/dl/'.length)));
       }
       if (path === '/feed.xml' && method === 'GET') return feed(env);
 

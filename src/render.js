@@ -82,7 +82,7 @@ a{color:var(--accent);text-decoration:none}
 .m-content pre code{background:none;padding:0}
 .m-content blockquote{margin:8px 0;padding:4px 12px;border-left:3px solid var(--line);color:var(--sub)}
 .m-content a{text-decoration:underline}
-.m-content a.more-link{text-decoration:none;white-space:nowrap}
+.m-content a.more-link{text-decoration:none;white-space:nowrap;margin-left:12px}
 .grid{display:grid;gap:6px;margin:8px 0 4px;max-width:420px}
 .grid img,.grid video{width:100%;height:100%;object-fit:cover;border-radius:6px;display:block;aspect-ratio:1/1}
 .grid.g1{max-width:360px}
@@ -357,7 +357,7 @@ const EMOJIS = ['😀','😁','😂','🤣','😊','😍','😘','😎','😜','
 const DOWNLOAD_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
 
 
-function fileList(media) {
+function fileList(media, dlCounts = {}) {
   const files = (media || []).filter((m) => m && m.url && m.type === 'file');
   if (!files.length) return '';
   return files
@@ -368,7 +368,12 @@ function fileList(media) {
       const ico = t
         ? `<span class="file-ico" style="background:${t[1]}">${t[0]}</span>`
         : `<span class="file-ico" style="background:#576b95">${DOWNLOAD_SVG}</span>`;
-      return `<a class="file-card" href="${esc(m.url)}" download>${ico}<span class="file-meta"><span class="file-name">${esc(name)}</span><span class="file-sub">点击下载</span></span></a>`;
+      // 本站上传的附件经 /dl 下载计数，卡片上显示已被下载的次数；外链文件直达、不计数
+      const isUp = typeof m.url === 'string' && m.url.startsWith('/media/uploads/');
+      const key = isUp ? m.url.slice('/media/'.length) : '';
+      const href = isUp ? '/dl/' + key.split('/').map(encodeURIComponent).join('/') : m.url;
+      const sub = isUp ? `点击下载 · 已下载 ${dlCounts[key] || 0} 次` : '点击下载';
+      return `<a class="file-card" href="${esc(href)}" download>${ico}<span class="file-meta"><span class="file-name">${esc(name)}</span><span class="file-sub">${sub}</span></span></a>`;
     })
     .join('');
 }
@@ -428,7 +433,7 @@ function contentHtml(memo, detail) {
   return renderContent(memo.content_md);
 }
 
-export function memoCard(memo, settings, { comments = [], liked = false, detail = false, isAdmin = false, user = null, userAvatars = {}, filesUnlocked = false, pwLocked = false, membersLocked = false, unlockErr = '' } = {}) {
+export function memoCard(memo, settings, { comments = [], liked = false, detail = false, isAdmin = false, user = null, userAvatars = {}, filesUnlocked = false, pwLocked = false, membersLocked = false, unlockErr = '', dlCounts = {} } = {}) {
   const media = parseJsonSafe(memo.media, []);
   const tags = String(memo.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
   const avatarStyle = settings.avatar_url
@@ -548,7 +553,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       ${mediaGrid(media)}
       ${(memo.files_gated && !filesUnlocked && media.some((mm) => mm && mm.url && mm.type === 'file'))
         ? `<div class="files-gated">🔒 附件文件需回复后可见，<a href="${detail ? '#comments' : `/memo/${memo.id}#comments`}">评论后即可查看</a></div>`
-        : fileList(media)}
+        : fileList(media, dlCounts)}
       ${extBlock(memo)}`}
       ${tags.length ? `<div class="tags">${tags.map((t) => `<a class="tag" href="/tag/${encodeURIComponent(t)}">#${esc(t)}</a>`).join('')}</div>` : ''}
     </div>
@@ -602,7 +607,6 @@ export function layout(settings, { title, body, activeTag = '', adminView = fals
   <div class="head-meta">${esc(settings.signature || '')}</div>
   <div class="toolbar">
     <a class="tb-btn${!activeTag ? ' on' : ''}" href="/" title="首页" aria-label="首页"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></a>
-    <span id="tag-chips"></span>
     <span class="spacer"></span>
     ${!adminView ? (user
       ? `${settings.users_can_post === '1' ? '<a class="tb-btn" href="/post/new" title="发布动态" aria-label="发布动态"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></a>' : ''}<a class="tb-link bell" href="/notifications" title="通知提醒" aria-label="通知提醒">🔔${notifCount ? `<span class="nbadge">${notifCount > 99 ? '99+' : notifCount}</span>` : ''}</a><span class="tb-user">${user.avatar ? `<img src="${esc(user.avatar)}" alt="" style="width:20px;height:20px;border-radius:50%;vertical-align:-5px;margin-right:4px">` : '👤 '}${esc(user.username)}</span><a class="tb-link" href="/logout">退出</a>`
@@ -618,16 +622,6 @@ export function layout(settings, { title, body, activeTag = '', adminView = fals
 <script>${JS}</script>
 </body>
 </html>`;
-}
-
-export function tagChipsScript(tags, activeTag) {
-  const chips = tags
-    .map(
-      (t) =>
-        `<a class="chip${t.tag === activeTag ? ' on' : ''}" href="/tag/${encodeURIComponent(t.tag)}">#${esc(t.tag)}（${t.c}）</a>`
-    )
-    .join(' ');
-  return `<script>document.getElementById('tag-chips').innerHTML=${JSON.stringify(chips)}</script>`;
 }
 
 export function linksBlock(settings) {

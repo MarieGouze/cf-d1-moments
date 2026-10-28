@@ -19,7 +19,7 @@ The footer shows live Cloudflare usage (storage + account-wide requests). Deploy
 
 - Timeline: cover image + avatar + nickname/signature header, single-column feed, relative timestamps ("x hours ago" within 24 hours, absolute date/time after that)
 - Optional post titles, shown above the body and used for the detail page title and RSS
-- Posting: rich-text editor (default) / Markdown source mode, switchable; image & video grids; arbitrary file uploads (archives, documents, installers) and external file cards; Bilibili / YouTube / NetEase Music / Douban / plain link cards; Douyin embeds via the official player (paste a long link, a `v.douyin.com` short link, or the whole share text)
+- Posting: rich-text editor (default) / Markdown source mode, switchable; image & video grids; arbitrary file uploads (archives, documents, installers) and external file cards (uploaded files are served through a counting download route, and each file card shows how many times it has been downloaded); Bilibili / YouTube / NetEase Music / Douban / plain link cards; Douyin embeds via the official player (paste a long link, a `v.douyin.com` short link, or the whole share text)
 - Video frames: direct/Bilibili/YouTube videos use one frame spec (full column width up to 460px, uncropped, no scrollbars); Douyin uses a compact left-aligned frame (about 380px tall) with the player stretched to fill it
 - Uploads are compressed in the browser before sending: JPEG/PNG/WebP images over 300KB are resized to a 1920px long edge and re-encoded as WebP (GIFs, videos and other files are untouched)
 - Reply-gated content: a post's body and/or its file attachments can be hidden until a visitor comments on that post (same-IP unlock; RSS output is redacted too)
