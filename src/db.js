@@ -2,7 +2,7 @@
 import { sha256Hex, randomToken, nowSec } from './utils.js';
 
 // 版本号（2026-10-26 用户定）：三段式 2.中.尾——增减功能递增中段、尾段归零；修 bug 只递增尾段。
-export const VERSION = '2.15.0';
+export const VERSION = '2.15.1';
 
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS memos (
@@ -345,16 +345,24 @@ export async function notifyForComment(env, c) {
   try {
     if (!c || !c.id || !c.memo_id) return;
     const recipients = new Map(); // user_id -> type
+    const settings = await getSettings(env);
+    const adminName = settings.nickname || '';
     // 1) 被回复的人：reply_to 是评论里记下的被回复者昵称，能对上注册用户才通知
     if (c.reply_to && c.reply_to !== c.name) {
       const u = await env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(c.reply_to).first();
       if (u) recipients.set(u.id, 'reply');
     }
+    // 1b) 被回复的是站长本人（reply_to 对上站长昵称）：站长以 user_id 0 收通知，前台信封角标可见
+    if (adminName && c.reply_to === adminName && c.name !== adminName) recipients.set(0, 'reply');
     // 2) 投稿作者：有人评论了我发的动态（与被回复的是同一人时只发一条，按回复计）
     const memo = await env.DB.prepare('SELECT author_id FROM memos WHERE id = ?').bind(c.memo_id).first();
     if (memo && memo.author_id > 0 && !recipients.has(memo.author_id)) {
       const au = await env.DB.prepare('SELECT id, username FROM users WHERE id = ?').bind(memo.author_id).first();
       if (au && au.username !== c.name) recipients.set(au.id, 'comment');
+    }
+    // 2b) 站长的动态被评论：同样通知站长（站长自己评论不通知自己）
+    if (memo && memo.author_id === 0 && adminName && c.name !== adminName && !recipients.has(0)) {
+      recipients.set(0, 'comment');
     }
     const excerpt = String(c.content || '').slice(0, 60);
     const now = nowSec();
@@ -367,11 +375,22 @@ export async function notifyForComment(env, c) {
   } catch { /* 通知失败不影响评论本身 */ }
 }
 
+// 站长信封角标 = 站长未读通知（user_id 0）+ 发给站长的未读私信
+export async function unreadAdminCount(env) {
+  try {
+    const r = await env.DB.prepare("SELECT COUNT(*) AS c FROM notifications WHERE user_id = 0 AND is_read = 0 AND type != 'dm'").first();
+    const d = await env.DB.prepare('SELECT COUNT(*) AS c FROM messages WHERE to_id = 0 AND is_read = 0').first();
+    return (r ? r.c : 0) + (d ? d.c : 0);
+  } catch { return 0; }
+}
+
 export async function unreadNotifCount(env, userId) {
   if (!userId) return 0;
   try {
-    const r = await env.DB.prepare('SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND is_read = 0').bind(userId).first();
-    return r ? r.c : 0;
+    // 铃铛角标 = 未读通知（评论/回复，dm 旧行不计）+ 未读私信条数，两边共用一个铃铛
+    const r = await env.DB.prepare("SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND is_read = 0 AND type != 'dm'").bind(userId).first();
+    const d = await env.DB.prepare('SELECT COUNT(*) AS c FROM messages WHERE to_id = ? AND is_read = 0').bind(userId).first();
+    return (r ? r.c : 0) + (d ? d.c : 0);
   } catch { return 0; }
 }
 

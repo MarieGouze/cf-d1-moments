@@ -1,5 +1,5 @@
 // cf-d1-moments：极简朋友圈（仿 kingwrcy/moments 版面，Cloudflare Workers + D1 + R2 重写）
-import { initDb, getSettings, isAdmin, gateCookieOk, currentUser, notifyForComment, unreadNotifCount } from './db.js';
+import { initDb, getSettings, isAdmin, gateCookieOk, currentUser, notifyForComment, unreadNotifCount, unreadAdminCount } from './db.js';
 import { layout, memoCard, linksBlock, pagerHtml, noticeHtml, timeAgo } from './render.js';
 import * as admin from './admin.js';
 import {
@@ -212,7 +212,8 @@ async function homePage(env, request, url, { tag = '' } = {}) {
     <div class="feed-box">${mq}${cards.join('<div class="memo-sep"></div>') || '<div class="memo">还没有动态。</div>'}${linksBlock(settings)}</div>
     ${pagerHtml(page, hasMore, base)}`;
   const notifCount = user ? await unreadNotifCount(env, user.id) : 0;
-  return htmlResponse(layout(await withUsage(env, settings), { title: tag ? `#${tag} · ${settings.site_name}` : settings.site_name, body, activeTag: tag, adminView, user, notifCount }));
+  const adminNotifCount = adminView ? await unreadAdminCount(env) : 0;
+  return htmlResponse(layout(await withUsage(env, settings), { title: tag ? `#${tag} · ${settings.site_name}` : settings.site_name, body, activeTag: tag, adminView, user, notifCount, adminNotifCount }));
 }
 
 async function memoDetail(env, request, id) {
@@ -249,7 +250,8 @@ async function memoDetail(env, request, id) {
     <div class="pager"><a href="/">← 回到时间线</a></div>`;
   const pageTitle = memo.title || (viewOk && !membersLocked ? plainTextExcerpt(memo.content_md, 40) : '') || settings.site_name;
   const notifCount = user ? await unreadNotifCount(env, user.id) : 0;
-  return htmlResponse(layout(await withUsage(env, settings), { title: `${pageTitle} · ${settings.site_name}`, body, adminView, user, notifCount }));
+  const adminNotifCount = adminView ? await unreadAdminCount(env) : 0;
+  return htmlResponse(layout(await withUsage(env, settings), { title: `${pageTitle} · ${settings.site_name}`, body, adminView, user, notifCount, adminNotifCount }));
 }
 
 async function likePost(env, request, id) {
@@ -374,28 +376,48 @@ async function commentPost(env, request, id) {
 }
 
 // 通知页：仅登录用户可见；打开即把全部通知标为已读（列表里本次仍按未读样式区分显示）
+// 消息中心：私信与通知共用铃铛，分两个板块——上「私信」（对话列表，点开进对话页，按私信已读状态计数），
+// 下「通知」（评论/回复，打开本页即标已读）。铃铛角标是两边未读之和（见 db.js unreadNotifCount）。
 async function notificationsPage(env, request) {
   const settings = await getSettings(env);
   const user = await currentUser(env, request);
   if (!user) return redirect('/login?next=/notifications');
+  // —— 私信板块 ——
+  const { results: msgs } = await env.DB.prepare(
+    'SELECT from_id, from_name, to_id, to_name, content, is_read, created_at FROM messages WHERE from_id = ? OR to_id = ? ORDER BY id DESC LIMIT 300'
+  ).bind(user.id, user.id).all();
+  const convs = new Map();
+  let dmUnread = 0;
+  for (const m of msgs || []) {
+    const oid = m.from_id === user.id ? m.to_id : m.from_id;
+    const oname = m.from_id === user.id ? m.to_name : m.from_name;
+    if (!convs.has(oid)) convs.set(oid, { oid, oname, last: m, unread: 0 });
+    if (m.to_id === user.id && !m.is_read) { convs.get(oid).unread += 1; dmUnread += 1; }
+  }
+  const dmItems = [...convs.values()].map((c) => `<a class="ntf${c.unread ? ' unread' : ''}" href="/messages/${c.oid}">
+      <span class="ntf-dot"></span>
+      <span class="ntf-main"><b>${escapeXml(c.oname)}</b>：${escapeXml(String(c.last.content).slice(0, 40))}${c.unread ? ` <span class="ao-tag">${c.unread} 条未读</span>` : ''}</span>
+      <span class="ntf-when">${timeAgo(c.last.created_at)}</span>
+    </a>`).join('');
+  // —— 通知板块 ——（dm 类旧通知行退役，不再单列，私信统一走上面的板块）
   const { results } = await env.DB.prepare(
-    'SELECT id, type, memo_id, actor, excerpt, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 50'
+    "SELECT id, type, memo_id, actor, excerpt, is_read, created_at FROM notifications WHERE user_id = ? AND type != 'dm' ORDER BY id DESC LIMIT 50"
   ).bind(user.id).all();
   const rows = results || [];
   await env.DB.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0').bind(user.id).run();
   const items = rows.map((n) => {
-    const isDm = n.type === 'dm';
-    const verb = isDm ? '给你发了私信' : n.type === 'reply' ? '回复了你' : '评论了你的动态';
-    // 私信通知的 memo_id 存的是发信人 id（站长为 0），点开直达与他的对话页
-    return `<a class="ntf${n.is_read ? '' : ' unread'}" href="${isDm ? `/messages/${n.memo_id}` : `/memo/${n.memo_id}`}">
+    const verb = n.type === 'reply' ? '回复了你' : '评论了你的动态';
+    return `<a class="ntf${n.is_read ? '' : ' unread'}" href="/memo/${n.memo_id}">
       <span class="ntf-dot"></span>
       <span class="ntf-main"><b>${escapeXml(n.actor)}</b> ${verb}：${escapeXml(n.excerpt)}</span>
       <span class="ntf-when">${timeAgo(n.created_at)}</span>
     </a>`;
   }).join('');
-  const body = `<div class="feed-box"><div class="ntf-head">🔔 通知提醒</div>${items || '<div class="memo">暂时没有通知。有人回复你的评论、或评论你发的动态时，会出现在这里。</div>'}</div>
+  const body = `<div class="feed-box"><div class="ntf-head">✉️ 私信</div>${dmItems || '<div class="memo">还没有私信。在评论区或动态上点对方的名字，就能给 TA 发私信。</div>'}
+    <div class="ntf-head" style="margin-top:16px">🔔 通知</div>${items || '<div class="memo">暂时没有通知。有人回复你的评论、或评论你发的动态时，会出现在这里。</div>'}</div>
     <div class="pager"><a href="/">← 回到时间线</a></div>`;
-  return htmlResponse(layout(await withUsage(env, settings), { title: `通知 · ${settings.site_name}`, body, user, notifCount: 0 }));
+  // 通知已在本页标已读，铃铛还剩未读私信数
+  return htmlResponse(layout(await withUsage(env, settings), { title: `消息中心 · ${settings.site_name}`, body, user, notifCount: dmUnread }));
 }
 
 // ---------------- 私信（注册用户互发 + 与站长往返） ----------------
@@ -442,37 +464,49 @@ async function dmSend(env, request) {
   }
   await env.DB.prepare('INSERT INTO messages (from_id, from_name, to_id, to_name, content, created_at) VALUES (?,?,?,?,?,?)')
     .bind(ident.me.id, ident.me.name, to, toName, content, now).run();
-  // 给注册用户收信人塞一条铃铛通知（站长没有前台铃铛，直接在私信页看）
-  if (to > 0) {
-    await env.DB.prepare('INSERT INTO notifications (user_id, type, memo_id, comment_id, actor, excerpt, created_at) VALUES (?,?,?,?,?,?,?)')
-      .bind(to, 'dm', ident.me.id, 0, ident.me.name, content.slice(0, 60), now).run();
-  }
+  // 私信不再写 notifications：铃铛角标与消息中心的「私信」板块直接按 messages 未读数算（见 unreadNotifCount / notificationsPage）
   return ajax ? Response.json({ ok: true }) : redirect(back);
 }
 
 async function messagesPage(env, request) {
   const ident = await dmIdentity(env, request);
   if (!ident) return redirect('/login?next=/messages');
+  // 注册用户的对话列表已并入铃铛消息中心；本页只留给站长（站长没有前台铃铛）
+  if (!ident.adminReq) return redirect('/notifications');
   const meId = ident.me.id;
   const { results } = await env.DB.prepare(
     'SELECT from_id, from_name, to_id, to_name, content, is_read, created_at FROM messages WHERE from_id = ? OR to_id = ? ORDER BY id DESC LIMIT 300'
   ).bind(meId, meId).all();
   const convs = new Map();
+  let dmUnread = 0;
   for (const m of results || []) {
     const oid = m.from_id === meId ? m.to_id : m.from_id;
     const oname = m.from_id === meId ? m.to_name : m.from_name;
     if (!convs.has(oid)) convs.set(oid, { oid, oname, last: m, unread: 0 });
-    if (m.to_id === meId && !m.is_read) convs.get(oid).unread += 1;
+    if (m.to_id === meId && !m.is_read) { convs.get(oid).unread += 1; dmUnread += 1; }
   }
   const items = [...convs.values()].map((c) => `<a class="ntf${c.unread ? ' unread' : ''}" href="/messages/${c.oid}">
       <span class="ntf-dot"></span>
       <span class="ntf-main"><b>${escapeXml(c.oname)}</b>：${escapeXml(String(c.last.content).slice(0, 40))}${c.unread ? ` <span class="ao-tag">${c.unread} 条未读</span>` : ''}</span>
       <span class="ntf-when">${timeAgo(c.last.created_at)}</span>
     </a>`).join('');
-  const body = `<div class="feed-box"><div class="ntf-head">✉️ 私信</div>${items || '<div class="memo">还没有私信。在评论区或动态上点对方的名字，就能给 TA 发私信。</div>'}</div>
+  // —— 站长通知板块（user_id 0：回复站长、评论站长动态）——打开本页即标已读
+  const { results: nrows } = await env.DB.prepare(
+    "SELECT type, memo_id, actor, excerpt, is_read, created_at FROM notifications WHERE user_id = 0 AND type != 'dm' ORDER BY id DESC LIMIT 50"
+  ).all();
+  await env.DB.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = 0 AND is_read = 0').run();
+  const nItems = (nrows || []).map((n) => {
+    const verb = n.type === 'reply' ? '回复了你' : '评论了你的动态';
+    return `<a class="ntf${n.is_read ? '' : ' unread'}" href="/memo/${n.memo_id}">
+      <span class="ntf-dot"></span>
+      <span class="ntf-main"><b>${escapeXml(n.actor)}</b> ${verb}：${escapeXml(n.excerpt)}</span>
+      <span class="ntf-when">${timeAgo(n.created_at)}</span>
+    </a>`;
+  }).join('');
+  const body = `<div class="feed-box"><div class="ntf-head">✉️ 私信</div>${items || '<div class="memo">还没有人给你发私信。</div>'}
+    <div class="ntf-head" style="margin-top:16px">🔔 通知</div>${nItems || '<div class="memo">暂时没有通知。有人回复你的评论、或评论你的动态时，会出现在这里。</div>'}</div>
     <div class="pager"><a href="/">← 回到时间线</a></div>`;
-  const notifCount = ident.user ? await unreadNotifCount(env, ident.user.id) : 0;
-  return htmlResponse(layout(await withUsage(env, ident.settings), { title: `私信 · ${ident.settings.site_name}`, body, adminView: ident.adminReq, user: ident.user, notifCount }));
+  return htmlResponse(layout(await withUsage(env, ident.settings), { title: `消息中心 · ${ident.settings.site_name}`, body, adminView: true, user: null, notifCount: 0, adminNotifCount: dmUnread }));
 }
 
 async function threadPage(env, request, otherId) {
@@ -510,9 +544,10 @@ async function threadPage(env, request, otherId) {
       <textarea name="content" rows="3" maxlength="200" placeholder="写下你想说的话（最多 200 字）" required></textarea>
       <div style="margin-top:8px"><button class="btn" type="submit">发送</button></div>
     </form></div>
-    <div class="pager"><a href="/messages">← 全部私信</a></div>`;
+    <div class="pager"><a href="${ident.adminReq ? '/messages' : '/notifications'}">← ${ident.adminReq ? '全部私信' : '消息中心'}</a></div>`;
   const notifCount = ident.user ? await unreadNotifCount(env, ident.user.id) : 0;
-  return htmlResponse(layout(await withUsage(env, ident.settings), { title: `与 ${otherName} 的私信 · ${ident.settings.site_name}`, body, adminView: ident.adminReq, user: ident.user, notifCount }));
+  const adminNotifCount = ident.adminReq ? await unreadAdminCount(env) : 0;
+  return htmlResponse(layout(await withUsage(env, ident.settings), { title: `与 ${otherName} 的私信 · ${ident.settings.site_name}`, body, adminView: ident.adminReq, user: ident.user, notifCount, adminNotifCount }));
 }
 
 // 附件下载：经 /dl/<key> 下载时计数一次（直链 /media 不计数），并强制以附件形式下载
