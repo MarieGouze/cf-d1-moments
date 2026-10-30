@@ -184,6 +184,8 @@ export function renderContent(content) {
 
 // 统一摘要：HTML 先去标签再截取
 export function excerptOf(content, len = 160) {
+  // 正文里的附件占位符 {{media:id}} 不是文字，摘要里先抹掉（渲染时会被替换成图片/视频/文件）
+  content = String(content || '').replace(/\{\{media:[\w-]+\}\}/g, ' ');
   if (isHtmlContent(content)) {
     const text = String(content)
       .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')

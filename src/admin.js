@@ -49,6 +49,8 @@ td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left;vertical-alig
 .thumbs .th{position:relative;width:76px;height:76px;border-radius:8px;overflow:hidden;background:#eee}
 .thumbs .th img,.thumbs .th video{width:100%;height:100%;object-fit:cover}
 .thumbs .th button{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:0;border-radius:50%;width:20px;height:20px;cursor:pointer;line-height:1}
+.thumbs .th:not(.file) button.th-ins{top:auto;bottom:0;left:0;right:0;width:100%;height:auto;border-radius:0;font-size:10px;padding:3px 0;background:rgba(0,0,0,.55)}
+.thumbs .th.file button.th-ins{background:#576b95;color:#fff;border-radius:6px;padding:2px 8px;font-size:11px;width:auto;height:auto}
 .thumbs .th.file{width:auto;height:auto;padding:8px 10px;font-size:12px;display:flex;align-items:center;gap:6px;background:#eef0f4}
 .thumbs .th.file button{position:static;background:#999}
 .editor-wrap{border:1px solid #ddd;border-radius:10px;overflow:hidden;margin:5px 0 12px;background:#fff}
@@ -409,7 +411,7 @@ function memoForm(memo, settings) {
       <textarea id="source-area" class="source-area" hidden placeholder="HTML 源码"></textarea>
       <textarea name="content_md" id="content-md" hidden></textarea>
     </div>
-    <label>附件：图片 / 视频 / 任意文件（含压缩包，上传到 R2）或外链</label>
+    <label>附件：图片 / 视频 / 任意文件（含压缩包，上传到 R2）或外链；点附件上的「插入正文」可放到正文指定位置，不点则默认排在正文末尾</label>
     <div class="thumbs" id="thumbs"></div>
     <div class="row">
       <input type="file" id="file-input" multiple style="width:auto;flex:1">
@@ -547,13 +549,25 @@ function memoForm(memo, settings) {
     var media = ${JSON.stringify(media)};
     var thumbs = document.getElementById('thumbs');
     var hidden = document.getElementById('media-json');
+    function newMid(){ return Math.random().toString(36).slice(2, 10); }
     function draw(){
+      media.forEach(function(m){ if (m && !m.id) m.id = newMid(); });
       hidden.value = JSON.stringify(media);
       thumbs.innerHTML = media.map(function(m,i){
-        if (m.type==='file') return '<div class="th file">📄 ' + (m.name || '附件') + '<button type="button" onclick="delMedia('+i+')">×</button></div>';
+        var ins = '<button type="button" class="th-ins" onclick="insMedia('+i+')" title="插入到正文光标处">插入正文</button>';
+        if (m.type==='file') return '<div class="th file">📄 ' + (m.name || '附件') + ins + '<button type="button" onclick="delMedia('+i+')">×</button></div>';
         var inner = m.type==='video' ? '<video src="'+m.url+'" muted></video>' : '<img src="'+m.url+'">';
-        return '<div class="th">'+inner+'<button type="button" onclick="delMedia('+i+')">×</button></div>';
+        return '<div class="th">'+inner+ins+'<button type="button" onclick="delMedia('+i+')">×</button></div>';
       }).join('');
+    }
+    function insMedia(i){
+      var m = media[i]; if (!m || !m.id) return;
+      var tok = '<p>{{media:' + m.id + '}}</p>';
+      if (sourceMode) {
+        var pos = source.selectionStart || 0;
+        source.value = source.value.slice(0, pos) + tok + source.value.slice(pos);
+        source.focus();
+      } else insertHtml(tok);
     }
     function delMedia(i){ media.splice(i,1); draw(); }
     document.getElementById('file-input').addEventListener('change', async function(e){
@@ -628,7 +642,7 @@ export async function memoSave(env, request, id) {
   }
   const title = String(f.get('title') || '').trim().slice(0, 80);
   const content = String(f.get('content_md') || '').trim();
-  const media = String(f.get('media_json') || '[]');
+  const media = ensureMediaIds(String(f.get('media_json') || '[]'));
   const tags = parseTags(f.get('tags')).join(',');
   const ext = buildExt(String(f.get('ext_type') || ''), f);
   const pinned = Math.min(3, Math.max(0, parseInt(f.get('pinned') || '0', 10) || 0));
@@ -1055,6 +1069,7 @@ export async function userPostPage(env, request, id) {
       <textarea name="content_md" rows="8" placeholder="写点什么…（支持 Markdown）" style="${inp}">${esc(memo.content_md || '')}</textarea>
       <div style="margin:2px 0 8px;font-size:14px">上传图片 / 压缩包（单个 ≤500KB）：<input type="file" accept="image/*,.zip,.rar,.7z,.tar,.gz,.tgz,.bz2,.xz" onchange="upFile(this)"></div>
       <div id="media-box"></div>
+      <div style="font-size:12px;color:var(--sub);margin:0 0 8px">附件点「插入正文」可放到正文指定位置；不点则默认排在正文末尾。</div>
       <input type="hidden" name="media_json" id="media_json" value="[]">
       <div style="margin-top:10px"><button class="btn" type="submit">${id ? '保存修改' : '发布'}</button>
       <a href="/" style="margin-left:10px;color:var(--sub)">取消</a></div>
@@ -1063,12 +1078,27 @@ export async function userPostPage(env, request, id) {
     <script>
 var mediaList = ${mediaJson};
 function renderMedia(){
+  mediaList.forEach(function(m){ if (m && !m.id) m.id = Math.random().toString(36).slice(2, 10); });
   var box = document.getElementById('media-box');
   box.innerHTML = mediaList.map(function(m, i){
     var inner = m.type === 'image' ? '<img src="' + m.url + '">' : '<span>' + (m.name || m.type) + '</span>';
-    return '<span class="up-item">' + inner + '<button type="button" onclick="rmMedia(' + i + ')">×</button></span>';
+    return '<span class="up-item">' + inner + '<button type="button" style="color:var(--accent);font-size:12px" onclick="insMediaU(' + i + ')">插入正文</button><button type="button" onclick="rmMedia(' + i + ')">×</button></span>';
   }).join('');
   document.getElementById('media_json').value = JSON.stringify(mediaList);
+}
+function insMediaU(i){
+  var m = mediaList[i]; if (!m || !m.id) return;
+  var ta = document.querySelector('textarea[name="content_md"]');
+  if (!ta) return;
+  var NL = String.fromCharCode(10);
+  var tok = '{{media:' + m.id + '}}';
+  var s0 = ta.selectionStart || 0, e0 = ta.selectionEnd || 0;
+  var before = ta.value.slice(0, s0), after = ta.value.slice(e0);
+  var ins = (before && before.slice(-1) !== NL ? NL : '') + tok + (after && after.slice(0, 1) !== NL ? NL : '');
+  ta.value = before + ins + after;
+  ta.focus();
+  var pos = (before + ins).length;
+  try { ta.setSelectionRange(pos, pos); } catch (err) {}
 }
 function rmMedia(i){ mediaList.splice(i, 1); renderMedia(); }
 function upFile(input){
@@ -1096,6 +1126,15 @@ renderMedia();
   return htmlResponse(layout(g.s, { title: (id ? '编辑动态' : '发布动态') + ' · ' + g.s.site_name, body, user: g.user, notifCount }));
 }
 
+function newMediaId() { return Math.random().toString(36).slice(2, 10); }
+// 附件稳定编号：正文 {{media:id}} 靠它定位；老附件没编号时保存时自动补上
+function ensureMediaIds(jsonStr) {
+  const arr = parseJsonSafe(jsonStr, []);
+  if (!Array.isArray(arr)) return '[]';
+  for (const m of arr) if (m && typeof m === 'object' && !m.id) m.id = newMediaId();
+  return JSON.stringify(arr);
+}
+
 function cleanUserMedia(raw) {
   const arr = parseJsonSafe(raw, []);
   if (!Array.isArray(arr)) return '[]';
@@ -1103,7 +1142,7 @@ function cleanUserMedia(raw) {
   for (const m of arr.slice(0, 30)) {
     if (!m || typeof m.url !== 'string' || !m.url.startsWith('/media/')) continue;
     const t = ['image', 'video', 'file'].includes(m.type) ? m.type : 'file';
-    out.push({ type: t, url: m.url, name: String(m.name || '').replace(/[<>"']/g, '').slice(0, 80) });
+    out.push({ type: t, url: m.url, name: String(m.name || '').replace(/[<>"']/g, '').slice(0, 80), id: /^[\w-]{1,32}$/.test(String(m.id || '')) ? String(m.id) : newMediaId() });
   }
   return JSON.stringify(out);
 }

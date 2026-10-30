@@ -160,6 +160,8 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .msg-row>div{max-width:78%}
 .msg-bub{padding:8px 12px;border-radius:12px;background:var(--chip);font-size:14px;line-height:1.55;word-break:break-word}
 .msg-row.me .msg-bub{background:var(--accent);color:#fff}
+.m-inline{margin:10px 0}
+.m-inline img{width:100%;border-radius:10px;display:block}
 .fr-item{border-bottom:1px dashed var(--line)}
 .fr-item:last-child{border-bottom:none}
 .fr-bar{display:flex;align-items:center;gap:12px;width:100%;background:none;border:none;padding:14px 6px;cursor:pointer;color:var(--text);font-size:15px;text-align:left;font-family:inherit;border-radius:8px;transition:background .15s}
@@ -456,6 +458,32 @@ function fileList(media, dlCounts = {}) {
     .join('');
 }
 
+// 正文内嵌附件：正文（HTML 或 Markdown 渲染后）里的 {{media:<id>}} 占位符替换成对应附件本体。
+// 独占一段的占位符（<p>{{media:x}}</p>）整段替换；混在文字中的就地替换。被引用的附件不再重复排到文末。
+function mediaItemHtml(m, dlCounts) {
+  if (m.type === 'file') return fileList([m], dlCounts);
+  if (m.type === 'video') return `<div class="vframe"><video src="${esc(m.url)}" controls preload="metadata" playsinline></video></div>`;
+  return `<div class="m-inline"><img src="${esc(m.url)}" loading="lazy" alt=""></div>`;
+}
+
+function applyInlineMedia(html, media, dlCounts, filesLocked) {
+  const byId = new Map();
+  for (const m of media || []) if (m && m.id && m.url) byId.set(String(m.id), m);
+  if (!byId.size) return { html, used: new Set() };
+  const used = new Set();
+  const swap = (id) => {
+    const m = byId.get(id);
+    if (!m) return '';
+    if (m.type === 'file' && filesLocked) return ''; // 附件门控未解锁时文件不内嵌，留在文末走锁定提示
+    used.add(id);
+    return mediaItemHtml(m, dlCounts);
+  };
+  const out = html
+    .replace(/<p>\s*\{\{media:([\w-]+)\}\}\s*<\/p>/g, (w, id) => swap(id))
+    .replace(/\{\{media:([\w-]+)\}\}/g, (w, id) => swap(id));
+  return { html: out, used };
+}
+
 function mediaGrid(media) {
   const items = (media || []).filter((m) => m && m.url && m.type !== 'file');
   if (!items.length) return '';
@@ -628,6 +656,10 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
           </form>
         </div>`
       : '';
+  // 正文内嵌附件先替换占位符，被引用的附件从文末列表里摘掉，避免重复出现
+  const filesLocked = !!(memo.files_gated && !filesUnlocked);
+  const inlined = applyInlineMedia(contentHtml(memo, detail), media, dlCounts, filesLocked);
+  const restMedia = media.filter((m) => !(m && m.id && inlined.used.has(String(m.id))));
   const cardHtml = `<article class="memo">
     <div class="memo-head">
       <div class="${cardAvatarCls}" ${cardAvatarStyle}>${cardAvatarInner}</div>
@@ -643,11 +675,11 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
         ? `<div class="files-gated">🔒 此动态已设密码保护${detail ? '' : `，<a href="/memo/${memo.id}">输入密码查看 →</a>`}</div>${detail ? `${unlockErr ? `<div style="color:#e5484d;margin-top:8px;font-size:14px">${unlockErr}</div>` : ''}<form method="post" action="/memo/${memo.id}/unlock" style="margin-top:8px;display:flex;gap:8px"><input type="password" name="password" placeholder="输入观看密码" required style="flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text)"><button class="btn" type="submit">查看</button></form>` : ''}`
         : (memo.content_gated && !filesUnlocked)
         ? `<div class="files-gated">🔒 本动态内容需回复后可见，<a href="${detail ? '#comments' : `/memo/${memo.id}#comments`}">评论后即可查看</a></div>`
-        : `<div class="m-content">${contentHtml(memo, detail)}</div>
-      ${mediaGrid(media)}
+        : `<div class="m-content">${inlined.html}</div>
+      ${mediaGrid(restMedia)}
       ${(memo.files_gated && !filesUnlocked && media.some((mm) => mm && mm.url && mm.type === 'file'))
         ? `<div class="files-gated">🔒 附件文件需回复后可见，<a href="${detail ? '#comments' : `/memo/${memo.id}#comments`}">评论后即可查看</a></div>`
-        : fileList(media, dlCounts)}
+        : fileList(restMedia, dlCounts)}
       ${extBlock(memo)}`}
       ${tags.length ? `<div class="tags">${tags.map((t) => `<a class="tag" href="/tag/${encodeURIComponent(t)}">#${esc(t)}</a>`).join('')}</div>` : ''}
     </div>
@@ -667,7 +699,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
   </article>`;
   if (!forum || detail) return cardHtml;
   // 论坛模式：整卡收拢成一行标题条（标题优先，无标题时用正文首行摘要顶替），点开才露出完整卡片
-  const firstLine = String(memo.content_md || '').split('\n').map((x) => x.trim()).find((x) => x) || '';
+  const firstLine = String(memo.content_md || '').replace(/\{\{media:[\w-]+\}\}/g, ' ').split('\n').map((x) => x.trim()).find((x) => x) || '';
   const plainFirst = firstLine.replace(/[#>*`\-\\[\]()!|]/g, '').trim();
   const barTitle = memo.title || plainFirst.slice(0, 60) || (media.length ? '📎 图文动态' : '（无标题）');
   const barAuthor = isUserPost ? (memo.author_name || '') : (settings.nickname || '');
