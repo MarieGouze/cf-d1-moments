@@ -61,9 +61,15 @@ td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left;vertical-alig
 .tb-sep{width:1px;height:18px;background:#ddd;margin:0 4px}
 .tb-color{position:relative;cursor:pointer;padding:4px 6px;font-weight:700;margin:0}
 .tb-color input{position:absolute;opacity:0;width:100%;height:100%;left:0;top:0;cursor:pointer;margin:0;padding:0}
+.color-panel{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px;border-bottom:1px solid #eee;background:#fafafa}
+.color-panel .cp-name{font-size:12px;color:#666}
+.swatch{width:26px;height:26px;border-radius:50%;border:2px solid #ddd;cursor:pointer;padding:0;flex:none}
+.swatch.def{border-radius:8px;background:#fff;color:#666;font-size:11px;width:auto;padding:0 10px}
+button.tb-color{background:none;border:0;font:inherit}
 .tc-hl{background:#fff3a3;padding:0 3px;border-radius:3px}
 .tb-on{background:#dde3ee !important}
 .emoji-panel{padding:8px;border-bottom:1px solid #eee}
+.link-panel .cp-name{font-size:12px;color:#666}
 .link-panel{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px;border-bottom:1px solid #eee;background:#fafafa}
 .link-panel input{flex:1;min-width:130px;width:auto;margin:0;padding:7px 9px}
 .link-panel .btn{padding:6px 12px}
@@ -390,8 +396,8 @@ function memoForm(memo, settings) {
         <button type="button" data-cmd="italic" title="斜体"><i>I</i></button>
         <button type="button" data-cmd="underline" title="下划线"><u>U</u></button>
         <button type="button" data-cmd="strikeThrough" title="删除线"><s>S</s></button>
-        <label class="tb-color" title="文字颜色"><span>A</span><input type="color" id="fore-color" value="#18181b"></label>
-        <label class="tb-color" title="背景高亮"><span class="tc-hl">A</span><input type="color" id="back-color" value="#fff3a3"></label>
+        <button type="button" class="tb-color" id="fore-color-btn" title="文字颜色"><span>A</span></button>
+        <button type="button" class="tb-color" id="back-color-btn" title="背景高亮"><span class="tc-hl">A</span></button>
         <span class="tb-sep"></span>
         <button type="button" id="link-btn" title="插入链接">🔗</button>
         <button type="button" id="image-btn" title="插入图片（填图片地址）">🖼️</button>
@@ -411,6 +417,8 @@ function memoForm(memo, settings) {
       </div>
       <div id="emoji-panel" class="emoji-panel" hidden>${emojiButtons}</div>
       <div id="link-panel" class="link-panel" hidden><input id="link-text" placeholder="显示文字"><input id="link-url" placeholder="链接地址 https://…"><button type="button" class="btn" id="link-ok">确定</button><button type="button" class="btn ghost" id="link-unlink" hidden>删链接</button><button type="button" class="btn ghost" id="link-cancel">取消</button></div>
+      <div id="color-panel" class="color-panel" hidden><span class="cp-name" id="cp-name">文字颜色</span><span id="cp-swatches" style="display:contents"></span></div>
+      <div id="url-panel" class="link-panel" hidden><span class="cp-name" id="url-name">插入图片</span><input id="url-input" placeholder="粘贴地址 https://…"><button type="button" class="btn" id="url-ok">确定</button><button type="button" class="btn ghost" id="url-cancel">取消</button></div>
       <div id="editor" class="editor-body" contenteditable="true" data-placeholder="这一刻的想法…">${initialHtml}</div>
       <textarea id="source-area" class="source-area" hidden placeholder="HTML 源码"></textarea>
       <textarea name="content_md" id="content-md" hidden></textarea>
@@ -477,26 +485,90 @@ function memoForm(memo, settings) {
       var sel = window.getSelection();
       sel.removeAllRanges(); sel.addRange(savedRange);
     }
-    function exec(cmd, val){ restoreRange(); document.execCommand(cmd, false, val || null); editor.focus(); saveRange(); }
+    function exec(cmd, val){ var cs = window.getSelection(); if (cs.rangeCount && editor.contains(cs.anchorNode)) saveRange(); restoreRange(); document.execCommand(cmd, false, val || null); editor.focus(); saveRange(); }
     function insertHtml(html){ restoreRange(); document.execCommand('insertHTML', false, html); editor.focus(); saveRange(); }
-    document.getElementById('editor-toolbar').addEventListener('mousedown', function(e){
-      if (e.target.closest('button')) e.preventDefault();
+    ['mousedown', 'pointerdown'].forEach(function(ev){
+      document.getElementById('editor-toolbar').addEventListener(ev, function(e){
+        if (e.target.closest('button')) e.preventDefault();
+      });
     });
     document.querySelectorAll('#editor-toolbar [data-cmd]').forEach(function(btn){
       btn.addEventListener('click', function(){ exec(btn.getAttribute('data-cmd')); });
+    });
+    ['format-select', 'fontsize-select'].forEach(function(id){
+      var el = document.getElementById(id);
+      if (!el) return;
+      ['pointerdown', 'touchstart', 'mousedown'].forEach(function(ev){ el.addEventListener(ev, saveRange, { passive: true }); });
     });
     document.getElementById('format-select').addEventListener('change', function(e){
       exec('formatBlock', e.target.value); e.target.value = 'p';
     });
     document.getElementById('fontsize-select').addEventListener('change', function(e){
-      if (e.target.value) exec('fontSize', e.target.value); e.target.value = '';
-    });
-    document.getElementById('fore-color').addEventListener('input', function(e){ exec('foreColor', e.target.value); });
-    document.getElementById('back-color').addEventListener('input', function(e){
+      var v = e.target.value; e.target.value = '';
+      if (!v) return;
+      var px = { '2': '13px', '3': '15px', '4': '18px', '5': '22px', '6': '28px' }[v];
+      if (!px) return;
       restoreRange();
-      if (!document.execCommand('hiliteColor', false, e.target.value)) document.execCommand('backColor', false, e.target.value);
+      var sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      var rg = sel.getRangeAt(0);
+      if (rg.collapsed) return;
+      var span = document.createElement('span');
+      span.style.fontSize = px;
+      try {
+        span.appendChild(rg.extractContents());
+        rg.insertNode(span);
+        var r2 = document.createRange(); r2.selectNodeContents(span);
+        sel.removeAllRanges(); sel.addRange(r2);
+      } catch (err) {}
       editor.focus(); saveRange();
     });
+    var colorPanel = document.getElementById('color-panel');
+    var cpName = document.getElementById('cp-name');
+    var cpSwatches = document.getElementById('cp-swatches');
+    var cpMode = 'color';
+    var TEXT_COLORS = ['#18181b', '#e5484d', '#d97c2b', '#e8a00c', '#3f9e4d', '#3b78c3', '#7c5cd6', '#e5639e', '#8a8f98', '#ffffff'];
+    var BG_COLORS = ['#fff3a3', '#ffd6d6', '#d9f2d9', '#d6e8ff', '#ffe9c9', '#eadcff', '#eeeeee'];
+    function openColorPanel(mode){
+      if (sourceMode) { alert('源码模式下请直接编辑 HTML'); return; }
+      saveRange();
+      if (!savedRange || savedRange.collapsed) { alert('先选中要改颜色的文字，再点颜色按钮'); return; }
+      cpMode = mode;
+      cpName.textContent = mode === 'color' ? '文字颜色' : '背景高亮';
+      cpSwatches.innerHTML = '';
+      var def = document.createElement('button');
+      def.type = 'button'; def.className = 'swatch def';
+      def.textContent = mode === 'color' ? '默认色' : '无底色';
+      def.addEventListener('click', function(){ applyColor(mode === 'color' ? 'inherit' : 'transparent'); });
+      cpSwatches.appendChild(def);
+      (mode === 'color' ? TEXT_COLORS : BG_COLORS).forEach(function(c){
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 'swatch'; b.style.background = c;
+        b.addEventListener('click', function(){ applyColor(c); });
+        cpSwatches.appendChild(b);
+      });
+      colorPanel.hidden = false;
+    }
+    function applyColor(value){
+      restoreRange();
+      var sel = window.getSelection();
+      if (!sel.rangeCount) { colorPanel.hidden = true; return; }
+      var rg = sel.getRangeAt(0);
+      if (rg.collapsed) { colorPanel.hidden = true; return; }
+      var span = document.createElement('span');
+      if (cpMode === 'color') span.style.color = value; else span.style.backgroundColor = value;
+      try {
+        span.appendChild(rg.extractContents());
+        rg.insertNode(span);
+        var r2 = document.createRange();
+        r2.selectNodeContents(span);
+        sel.removeAllRanges(); sel.addRange(r2);
+      } catch (e) {}
+      colorPanel.hidden = true;
+      editor.focus(); saveRange();
+    }
+    document.getElementById('fore-color-btn').addEventListener('click', function(){ openColorPanel('color'); });
+    document.getElementById('back-color-btn').addEventListener('click', function(){ openColorPanel('bg'); });
     var linkPanel = document.getElementById('link-panel');
     var linkText = document.getElementById('link-text');
     var linkUrl = document.getElementById('link-url');
@@ -558,21 +630,49 @@ function memoForm(memo, settings) {
       editor.focus(); saveRange();
     });
     document.getElementById('link-cancel').addEventListener('click', function(){ linkPanel.hidden = true; editingA = null; });
-    document.getElementById('image-btn').addEventListener('click', function(){
-      var url = prompt('图片地址（https://…）', '');
-      if (url) exec('insertImage', url);
-    });
-    document.getElementById('video-btn').addEventListener('click', function(){
-      var url = prompt('粘贴 YouTube 或 Bilibili 视频链接', '');
+    var urlPanel = document.getElementById('url-panel');
+    var urlName = document.getElementById('url-name');
+    var urlInput = document.getElementById('url-input');
+    var urlMode = 'image';
+    function openUrlPanel(mode){
+      if (sourceMode) { alert('源码模式下请直接编辑 HTML'); return; }
+      saveRange();
+      urlMode = mode;
+      urlName.textContent = mode === 'image' ? '插入图片' : '插入视频';
+      urlInput.value = '';
+      urlInput.placeholder = mode === 'image' ? '图片地址 https://…' : '粘贴 YouTube 或 Bilibili 视频链接';
+      urlPanel.hidden = false;
+      urlInput.focus();
+    }
+    document.getElementById('url-cancel').addEventListener('click', function(){ urlPanel.hidden = true; });
+    document.getElementById('url-ok').addEventListener('click', function(){
+      var url = urlInput.value.trim();
+      urlPanel.hidden = true;
       if (!url) return;
-      var src = '';
-      var m = url.match(/(?:youtube\\.com\\/watch\\?v=|youtu\\.be\\/)([\\w-]{6,})/);
-      if (m) src = 'https://www.youtube.com/embed/' + m[1];
-      var b = url.match(/bilibili\\.com\\/video\\/(BV[\\w]+)/);
-      if (b) src = 'https://player.bilibili.com/player.html?bvid=' + b[1] + '&autoplay=0';
-      if (!src) { alert('只支持 YouTube 和 Bilibili 的视频链接'); return; }
-      insertHtml('<p><iframe src="' + src + '" width="560" height="315" allowfullscreen frameborder="0"></iframe></p><p><br></p>');
+      if (urlMode === 'image') {
+        var img = document.createElement('img');
+        img.src = url;
+        restoreRange();
+        var sel = window.getSelection();
+        if (sel.rangeCount) {
+          var rg = sel.getRangeAt(0);
+          rg.deleteContents(); rg.insertNode(img);
+          rg.setStartAfter(img); rg.setEndAfter(img);
+          sel.removeAllRanges(); sel.addRange(rg);
+        } else editor.appendChild(img);
+        editor.focus(); saveRange();
+      } else {
+        var src = '';
+        var m = url.match(/(?:youtube\\.com\\/watch\\?v=|youtu\\.be\\/)([\\w-]{6,})/);
+        if (m) src = 'https://www.youtube.com/embed/' + m[1];
+        var b = url.match(/bilibili\\.com\\/video\\/(BV[\\w]+)/);
+        if (b) src = 'https://player.bilibili.com/player.html?bvid=' + b[1] + '&autoplay=0';
+        if (!src) { alert('只支持 YouTube 和 Bilibili 的视频链接'); return; }
+        insertHtml('<p><iframe src="' + src + '" width="560" height="315" allowfullscreen frameborder="0"></iframe></p><p><br></p>');
+      }
     });
+    document.getElementById('image-btn').addEventListener('click', function(){ openUrlPanel('image'); });
+    document.getElementById('video-btn').addEventListener('click', function(){ openUrlPanel('video'); });
     var panel = document.getElementById('emoji-panel');
     document.getElementById('emoji-btn').addEventListener('click', function(){ panel.hidden = !panel.hidden; });
     panel.querySelectorAll('.emoji-btn').forEach(function(btn){
