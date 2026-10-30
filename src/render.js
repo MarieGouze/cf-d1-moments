@@ -157,7 +157,8 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .dm-err{color:#e5484d;font-size:13px;min-height:18px;margin-top:6px}
 .msg-row{display:flex;margin:8px 0}
 .msg-row.me{justify-content:flex-end}
-.msg-bub{max-width:78%;padding:8px 12px;border-radius:12px;background:var(--chip);font-size:14px;line-height:1.55;word-break:break-word}
+.msg-row>div{max-width:78%}
+.msg-bub{padding:8px 12px;border-radius:12px;background:var(--chip);font-size:14px;line-height:1.55;word-break:break-word}
 .msg-row.me .msg-bub{background:var(--accent);color:#fff}
 .fr-item{border-bottom:1px dashed var(--line)}
 .fr-item:last-child{border-bottom:none}
@@ -173,7 +174,14 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .fr-body .memo{border-bottom:none;padding-bottom:2px}
 .msg-when{font-size:11px;color:var(--sub);margin:2px 2px 0}
 .msg-row.me .msg-when{text-align:right}
-.ntf-head{font-size:16px;font-weight:700;padding:10px 0 6px}
+.ntf-head{font-size:16px;font-weight:700;padding:10px 0 6px;display:flex;align-items:center}
+.ntf-link{display:flex;align-items:baseline;gap:8px;flex:1;min-width:0;color:inherit;text-decoration:none}
+.ntf form{margin:0;flex:none}
+.ntf-del{background:none;border:none;color:var(--sub);font-size:13px;cursor:pointer;padding:2px 6px;line-height:1.4}
+.ntf-del:hover{color:#e5484d}
+.ntf-clear{margin-left:auto}
+.ntf-clear button{background:none;border:1px solid var(--line);color:var(--sub);font-size:12px;font-weight:400;border-radius:999px;padding:3px 12px;cursor:pointer}
+.ntf-clear button:hover{color:#e5484d;border-color:#e5484d}
 .ntf{display:flex;align-items:baseline;gap:8px;padding:10px 2px;border-bottom:1px dashed var(--line);color:var(--text);font-size:14px;text-decoration:none}
 .ntf:last-child{border-bottom:0}
 .ntf-dot{flex:0 0 8px;width:8px;height:8px;border-radius:50%;background:transparent;position:relative;top:-1px}
@@ -614,7 +622,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
             <input type="hidden" name="parent_id" value="0">
             <input type="hidden" name="reply_to" value="">
             ${identityHtml}${capRow}
-            <textarea name="content" rows="3" maxlength="50" data-ph="写下你的评论（最多 50 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" placeholder="写下你的评论（最多 50 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" required></textarea>
+            <textarea name="content" rows="3" maxlength="${user || isAdmin ? 80 : 50}" data-ph="写下你的评论（最多 ${user || isAdmin ? 80 : 50} 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" placeholder="写下你的评论（最多 ${user || isAdmin ? 80 : 50} 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" required></textarea>
             <div class="btn-row"><button class="btn" type="submit">发表评论</button><button class="btn ghost" type="button" id="cancel-reply-${memo.id}" style="display:none" onclick="cancelReply(${memo.id})">取消回复</button>${isAdmin ? '' : `<label class="ao-check"><input type="checkbox" name="admin_only" value="1">仅管理员可见</label>`}<button class="emoji-toggle" type="button" title="插入表情" onclick="toggleEmoji(${memo.id})">😊</button></div>
             <div class="emoji-panel" id="emoji-panel-${memo.id}">${EMOJIS.map((e) => `<button type="button" class="emo" onclick="insertEmoji(${memo.id},this)">${e}</button>`).join('')}</div>
           </form>

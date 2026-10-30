@@ -302,7 +302,8 @@ async function commentPost(env, request, id) {
     : user
       ? user.username
       : `游客${100 + Math.floor(Math.random() * 900)}`;
-  const content = String(form.get('content') || '').trim().slice(0, 50);
+  // 字数上限：注册用户与站长 80 字，游客 50 字
+  const content = String(form.get('content') || '').trim().slice(0, user || adminReq ? 80 : 50);
   if (!content) return redirect(`${back}?c=empty`);
   // 回复：parent_id 必须指向同一动态下已通过的评论，reply_to 以库中昵称为准
   let parentId = 0;
@@ -384,7 +385,7 @@ async function notificationsPage(env, request) {
   if (!user) return redirect('/login?next=/notifications');
   // —— 私信板块 ——
   const { results: msgs } = await env.DB.prepare(
-    'SELECT from_id, from_name, to_id, to_name, content, is_read, created_at FROM messages WHERE from_id = ? OR to_id = ? ORDER BY id DESC LIMIT 300'
+    'SELECT from_id, from_name, to_id, to_name, content, is_read, created_at FROM messages WHERE (from_id = ? AND del_from = 0) OR (to_id = ? AND del_to = 0) ORDER BY id DESC LIMIT 300'
   ).bind(user.id, user.id).all();
   const convs = new Map();
   let dmUnread = 0;
@@ -394,11 +395,12 @@ async function notificationsPage(env, request) {
     if (!convs.has(oid)) convs.set(oid, { oid, oname, last: m, unread: 0 });
     if (m.to_id === user.id && !m.is_read) { convs.get(oid).unread += 1; dmUnread += 1; }
   }
-  const dmItems = [...convs.values()].map((c) => `<a class="ntf${c.unread ? ' unread' : ''}" href="/messages/${c.oid}">
-      <span class="ntf-dot"></span>
+  const dmItems = [...convs.values()].map((c) => `<div class="ntf${c.unread ? ' unread' : ''}">
+      <a class="ntf-link" href="/messages/${c.oid}"><span class="ntf-dot"></span>
       <span class="ntf-main"><b>${escapeXml(c.oname)}</b>：${escapeXml(String(c.last.content).slice(0, 40))}${c.unread ? ` <span class="ao-tag">${c.unread} 条未读</span>` : ''}</span>
-      <span class="ntf-when">${timeAgo(c.last.created_at)}</span>
-    </a>`).join('');
+      <span class="ntf-when">${timeAgo(c.last.created_at)}</span></a>
+      <form method="post" action="/dm/delete-conv" onsubmit="return confirm('删除与「${escapeXml(c.oname)}」的对话？只删你这边的记录，对方不受影响。')"><input type="hidden" name="other" value="${c.oid}"><input type="hidden" name="back" value="/notifications"><button class="ntf-del" type="submit" title="删除对话" aria-label="删除对话">✕</button></form>
+    </div>`).join('');
   // —— 通知板块 ——（dm 类旧通知行退役，不再单列，私信统一走上面的板块）
   const { results } = await env.DB.prepare(
     "SELECT id, type, memo_id, actor, excerpt, is_read, created_at FROM notifications WHERE user_id = ? AND type != 'dm' ORDER BY id DESC LIMIT 50"
@@ -407,14 +409,15 @@ async function notificationsPage(env, request) {
   await env.DB.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0').bind(user.id).run();
   const items = rows.map((n) => {
     const verb = n.type === 'reply' ? '回复了你' : '评论了你的动态';
-    return `<a class="ntf${n.is_read ? '' : ' unread'}" href="/memo/${n.memo_id}">
-      <span class="ntf-dot"></span>
+    return `<div class="ntf${n.is_read ? '' : ' unread'}">
+      <a class="ntf-link" href="/memo/${n.memo_id}"><span class="ntf-dot"></span>
       <span class="ntf-main"><b>${escapeXml(n.actor)}</b> ${verb}：${escapeXml(n.excerpt)}</span>
-      <span class="ntf-when">${timeAgo(n.created_at)}</span>
-    </a>`;
+      <span class="ntf-when">${timeAgo(n.created_at)}</span></a>
+      <form method="post" action="/notifications/delete"><input type="hidden" name="id" value="${n.id}"><input type="hidden" name="back" value="/notifications"><button class="ntf-del" type="submit" title="删除这条通知" aria-label="删除这条通知">✕</button></form>
+    </div>`;
   }).join('');
   const body = `<div class="feed-box"><div class="ntf-head">✉️ 私信</div>${dmItems || '<div class="memo">还没有私信。在评论区或动态上点对方的名字，就能给 TA 发私信。</div>'}
-    <div class="ntf-head" style="margin-top:16px">🔔 通知</div>${items || '<div class="memo">暂时没有通知。有人回复你的评论、或评论你发的动态时，会出现在这里。</div>'}</div>
+    <div class="ntf-head" style="margin-top:16px">🔔 通知${rows.length ? '<form class="ntf-clear" method="post" action="/notifications/clear" onsubmit="return confirm(\'确定清空全部通知？\')"><input type="hidden" name="back" value="/notifications"><button type="submit">清空</button></form>' : ''}</div>${items || '<div class="memo">暂时没有通知。有人回复你的评论、或评论你发的动态时，会出现在这里。</div>'}</div>
     <div class="pager"><a href="/">← 回到时间线</a></div>`;
   // 通知已在本页标已读，铃铛还剩未读私信数
   return htmlResponse(layout(await withUsage(env, settings), { title: `消息中心 · ${settings.site_name}`, body, user, notifCount: dmUnread }));
@@ -475,7 +478,7 @@ async function messagesPage(env, request) {
   if (!ident.adminReq) return redirect('/notifications');
   const meId = ident.me.id;
   const { results } = await env.DB.prepare(
-    'SELECT from_id, from_name, to_id, to_name, content, is_read, created_at FROM messages WHERE from_id = ? OR to_id = ? ORDER BY id DESC LIMIT 300'
+    'SELECT from_id, from_name, to_id, to_name, content, is_read, created_at FROM messages WHERE (from_id = ? AND del_from = 0) OR (to_id = ? AND del_to = 0) ORDER BY id DESC LIMIT 300'
   ).bind(meId, meId).all();
   const convs = new Map();
   let dmUnread = 0;
@@ -485,26 +488,28 @@ async function messagesPage(env, request) {
     if (!convs.has(oid)) convs.set(oid, { oid, oname, last: m, unread: 0 });
     if (m.to_id === meId && !m.is_read) { convs.get(oid).unread += 1; dmUnread += 1; }
   }
-  const items = [...convs.values()].map((c) => `<a class="ntf${c.unread ? ' unread' : ''}" href="/messages/${c.oid}">
-      <span class="ntf-dot"></span>
+  const items = [...convs.values()].map((c) => `<div class="ntf${c.unread ? ' unread' : ''}">
+      <a class="ntf-link" href="/messages/${c.oid}"><span class="ntf-dot"></span>
       <span class="ntf-main"><b>${escapeXml(c.oname)}</b>：${escapeXml(String(c.last.content).slice(0, 40))}${c.unread ? ` <span class="ao-tag">${c.unread} 条未读</span>` : ''}</span>
-      <span class="ntf-when">${timeAgo(c.last.created_at)}</span>
-    </a>`).join('');
+      <span class="ntf-when">${timeAgo(c.last.created_at)}</span></a>
+      <form method="post" action="/dm/delete-conv" onsubmit="return confirm('删除与「${escapeXml(c.oname)}」的对话？只删你这边的记录，对方不受影响。')"><input type="hidden" name="other" value="${c.oid}"><input type="hidden" name="back" value="/messages"><button class="ntf-del" type="submit" title="删除对话" aria-label="删除对话">✕</button></form>
+    </div>`).join('');
   // —— 站长通知板块（user_id 0：回复站长、评论站长动态）——打开本页即标已读
   const { results: nrows } = await env.DB.prepare(
-    "SELECT type, memo_id, actor, excerpt, is_read, created_at FROM notifications WHERE user_id = 0 AND type != 'dm' ORDER BY id DESC LIMIT 50"
+    "SELECT id, type, memo_id, actor, excerpt, is_read, created_at FROM notifications WHERE user_id = 0 AND type != 'dm' ORDER BY id DESC LIMIT 50"
   ).all();
   await env.DB.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = 0 AND is_read = 0').run();
   const nItems = (nrows || []).map((n) => {
     const verb = n.type === 'reply' ? '回复了你' : '评论了你的动态';
-    return `<a class="ntf${n.is_read ? '' : ' unread'}" href="/memo/${n.memo_id}">
-      <span class="ntf-dot"></span>
+    return `<div class="ntf${n.is_read ? '' : ' unread'}">
+      <a class="ntf-link" href="/memo/${n.memo_id}"><span class="ntf-dot"></span>
       <span class="ntf-main"><b>${escapeXml(n.actor)}</b> ${verb}：${escapeXml(n.excerpt)}</span>
-      <span class="ntf-when">${timeAgo(n.created_at)}</span>
-    </a>`;
+      <span class="ntf-when">${timeAgo(n.created_at)}</span></a>
+      <form method="post" action="/notifications/delete"><input type="hidden" name="id" value="${n.id}"><input type="hidden" name="back" value="/messages"><button class="ntf-del" type="submit" title="删除这条通知" aria-label="删除这条通知">✕</button></form>
+    </div>`;
   }).join('');
   const body = `<div class="feed-box"><div class="ntf-head">✉️ 私信</div>${items || '<div class="memo">还没有人给你发私信。</div>'}
-    <div class="ntf-head" style="margin-top:16px">🔔 通知</div>${nItems || '<div class="memo">暂时没有通知。有人回复你的评论、或评论你的动态时，会出现在这里。</div>'}</div>
+    <div class="ntf-head" style="margin-top:16px">🔔 通知${(nrows || []).length ? '<form class="ntf-clear" method="post" action="/notifications/clear" onsubmit="return confirm(\'确定清空全部通知？\')"><input type="hidden" name="back" value="/messages"><button type="submit">清空</button></form>' : ''}</div>${nItems || '<div class="memo">暂时没有通知。有人回复你的评论、或评论你的动态时，会出现在这里。</div>'}</div>
     <div class="pager"><a href="/">← 回到时间线</a></div>`;
   return htmlResponse(layout(await withUsage(env, ident.settings), { title: `消息中心 · ${ident.settings.site_name}`, body, adminView: true, user: null, notifCount: 0, adminNotifCount: dmUnread }));
 }
@@ -523,7 +528,7 @@ async function threadPage(env, request, otherId) {
     otherName = u.username;
   }
   const { results } = await env.DB.prepare(
-    'SELECT from_id, content, created_at FROM messages WHERE (from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?) ORDER BY id ASC LIMIT 200'
+    'SELECT from_id, content, created_at FROM messages WHERE (from_id = ? AND to_id = ? AND del_from = 0) OR (from_id = ? AND to_id = ? AND del_to = 0) ORDER BY id ASC LIMIT 200'
   ).bind(meId, otherId, otherId, meId).all();
   await env.DB.prepare('UPDATE messages SET is_read = 1 WHERE to_id = ? AND from_id = ? AND is_read = 0').bind(meId, otherId).run();
   const bubbles = (results || []).map((m) => {
@@ -534,7 +539,7 @@ async function threadPage(env, request, otherId) {
   const err = url.searchParams.get('e');
   const capRow = ident.adminReq ? '' : `<div class="row"><img class="cap" alt="验证码" title="点图刷新" onclick="refreshCap(this)" src="/captcha?t=${Date.now()}">
               <input name="captcha" maxlength="4" placeholder="验证码" required style="max-width:110px"></div>`;
-  const body = `<div class="feed-box"><div class="ntf-head">与 ${escapeXml(otherName)} 的私信</div>
+  const body = `<div class="feed-box"><div class="ntf-head">与 ${escapeXml(otherName)} 的私信<form class="ntf-clear" method="post" action="/dm/delete-conv" onsubmit="return confirm('删除与「${escapeXml(otherName)}」的对话？只删你这边的记录，对方不受影响。')"><input type="hidden" name="other" value="${otherId}"><button type="submit">删除对话</button></form></div>
     ${err ? `<div class="notice">${escapeXml(err)}</div>` : ''}
     ${bubbles || '<div class="memo">还没有往来消息，在下面给 TA 发第一条吧。</div>'}
     <form class="th-form" method="post" action="/dm/send">
@@ -548,6 +553,49 @@ async function threadPage(env, request, otherId) {
   const notifCount = ident.user ? await unreadNotifCount(env, ident.user.id) : 0;
   const adminNotifCount = ident.adminReq ? await unreadAdminCount(env) : 0;
   return htmlResponse(layout(await withUsage(env, ident.settings), { title: `与 ${otherName} 的私信 · ${ident.settings.site_name}`, body, adminView: ident.adminReq, user: ident.user, notifCount, adminNotifCount }));
+}
+
+// 删除对话：只删自己这一侧（我发的置 del_from、我收的置 del_to），对方完全不受影响；
+// 对方再发新消息时，对话会带着新消息重新出现在我的列表里（旧消息仍保持隐藏）。
+async function convDelete(env, request) {
+  const ident = await dmIdentity(env, request);
+  if (!ident) return redirect('/login?next=/notifications');
+  const form = await request.formData().catch(() => null);
+  const other = parseInt(String((form && form.get('other')) || ''), 10);
+  if (Number.isFinite(other) && other >= 0 && other !== ident.me.id) {
+    await env.DB.prepare('UPDATE messages SET del_from = 1 WHERE from_id = ? AND to_id = ?').bind(ident.me.id, other).run();
+    await env.DB.prepare('UPDATE messages SET del_to = 1 WHERE to_id = ? AND from_id = ?').bind(ident.me.id, other).run();
+  }
+  const back = (form && String(form.get('back') || '')) || (ident.adminReq ? '/messages' : '/notifications');
+  return redirect(back);
+}
+
+// 通知身份：站长为 0，注册用户为 users.id（通知删除/清空共用）
+async function notifOwner(env, request) {
+  if (await isAdmin(env, request)) return 0;
+  const u = await currentUser(env, request);
+  return u ? u.id : null;
+}
+
+async function notifDelete(env, request) {
+  const uid = await notifOwner(env, request);
+  if (uid === null) return redirect('/login?next=/notifications');
+  const form = await request.formData().catch(() => null);
+  const id = parseInt(String((form && form.get('id')) || ''), 10);
+  if (Number.isFinite(id)) {
+    await env.DB.prepare('DELETE FROM notifications WHERE id = ? AND user_id = ?').bind(id, uid).run();
+  }
+  const back = (form && String(form.get('back') || '')) || (uid === 0 ? '/messages' : '/notifications');
+  return redirect(back);
+}
+
+async function notifClear(env, request) {
+  const uid = await notifOwner(env, request);
+  if (uid === null) return redirect('/login?next=/notifications');
+  await env.DB.prepare('DELETE FROM notifications WHERE user_id = ?').bind(uid).run();
+  const form = await request.formData().catch(() => null);
+  const back = (form && String(form.get('back') || '')) || (uid === 0 ? '/messages' : '/notifications');
+  return redirect(back);
 }
 
 // 附件下载：经 /dl/<key> 下载时计数一次（直链 /media 不计数），并强制以附件形式下载
@@ -743,6 +791,9 @@ export default {
       if (path === '/logout' && method === 'GET') return admin.userLogout(env, request);
       if (path === '/notifications' && method === 'GET') return notificationsPage(env, request);
       if (path === '/dm/send' && method === 'POST') return dmSend(env, request);
+      if (path === '/dm/delete-conv' && method === 'POST') return convDelete(env, request);
+      if (path === '/notifications/delete' && method === 'POST') return notifDelete(env, request);
+      if (path === '/notifications/clear' && method === 'POST') return notifClear(env, request);
       if (path === '/messages' && method === 'GET') return messagesPage(env, request);
       { const dmM = path.match(/^\/messages\/(\d+)$/); if (dmM && method === 'GET') return threadPage(env, request, Number(dmM[1])); }
       if (path === '/post/new') {

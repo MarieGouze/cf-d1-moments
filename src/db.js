@@ -2,7 +2,7 @@
 import { sha256Hex, randomToken, nowSec } from './utils.js';
 
 // 版本号（2026-10-26 用户定）：三段式 2.中.尾——增减功能递增中段、尾段归零；修 bug 只递增尾段。
-export const VERSION = '2.15.1';
+export const VERSION = '2.16.0';
 
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS memos (
@@ -86,6 +86,8 @@ const CREATE_STATEMENTS = [
     to_name TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
     is_read INTEGER NOT NULL DEFAULT 0,
+    del_from INTEGER NOT NULL DEFAULT 0,
+    del_to INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(to_id, is_read, id)`,
@@ -156,6 +158,15 @@ export async function initDb(env) {
   // 迁移：comments.admin_only（评论者勾选「仅管理员可见」时为 1，前台对非管理员不显示、不计入数量）
   if (!cNames.includes('admin_only')) {
     await env.DB.prepare('ALTER TABLE comments ADD COLUMN admin_only INTEGER NOT NULL DEFAULT 0').run();
+  }
+  // 迁移：messages.del_from / del_to（删除对话只删自己一侧：发信人删置 del_from、收信人删置 del_to）
+  const msgCols = await env.DB.prepare("PRAGMA table_info(messages)").all();
+  const msgNames = (msgCols.results || []).map((c) => c.name);
+  if (msgNames.length && !msgNames.includes('del_from')) {
+    await env.DB.prepare('ALTER TABLE messages ADD COLUMN del_from INTEGER NOT NULL DEFAULT 0').run();
+  }
+  if (msgNames.length && !msgNames.includes('del_to')) {
+    await env.DB.prepare('ALTER TABLE messages ADD COLUMN del_to INTEGER NOT NULL DEFAULT 0').run();
   }
   // 迁移：memos.hidden（隐藏动态，仅管理员可见）
   const cols = await env.DB.prepare("PRAGMA table_info(memos)").all();
@@ -379,7 +390,7 @@ export async function notifyForComment(env, c) {
 export async function unreadAdminCount(env) {
   try {
     const r = await env.DB.prepare("SELECT COUNT(*) AS c FROM notifications WHERE user_id = 0 AND is_read = 0 AND type != 'dm'").first();
-    const d = await env.DB.prepare('SELECT COUNT(*) AS c FROM messages WHERE to_id = 0 AND is_read = 0').first();
+    const d = await env.DB.prepare('SELECT COUNT(*) AS c FROM messages WHERE to_id = 0 AND is_read = 0 AND del_to = 0').first();
     return (r ? r.c : 0) + (d ? d.c : 0);
   } catch { return 0; }
 }
@@ -389,7 +400,7 @@ export async function unreadNotifCount(env, userId) {
   try {
     // 铃铛角标 = 未读通知（评论/回复，dm 旧行不计）+ 未读私信条数，两边共用一个铃铛
     const r = await env.DB.prepare("SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND is_read = 0 AND type != 'dm'").bind(userId).first();
-    const d = await env.DB.prepare('SELECT COUNT(*) AS c FROM messages WHERE to_id = ? AND is_read = 0').bind(userId).first();
+    const d = await env.DB.prepare('SELECT COUNT(*) AS c FROM messages WHERE to_id = ? AND is_read = 0 AND del_to = 0').bind(userId).first();
     return (r ? r.c : 0) + (d ? d.c : 0);
   } catch { return 0; }
 }
