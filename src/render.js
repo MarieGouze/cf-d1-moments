@@ -257,7 +257,7 @@ function toggleCmt(id){
     if(img && !img.getAttribute('src')) img.src='/captcha?t='+Date.now();
   }
 }
-function replyTo(btn, memoId, rootId){
+function replyTo(btn, memoId, rootId, targetId){
   var name=btn.getAttribute('data-rname')||'';
   var wrap=document.getElementById('cmt-form-'+memoId);
   if(wrap){
@@ -268,6 +268,7 @@ function replyTo(btn, memoId, rootId){
   var form=document.querySelector('#cmt-form-'+memoId+' form');
   if(!form) return;
   form.querySelector('input[name=parent_id]').value=rootId;
+  form.querySelector('input[name=reply_target]').value=targetId||rootId;
   form.querySelector('input[name=reply_to]').value=name;
   document.getElementById('cancel-reply-'+memoId).style.display='';
   var ta=form.querySelector('textarea');
@@ -318,6 +319,7 @@ document.addEventListener('DOMContentLoaded', function(){
   if(capImg && !capImg.getAttribute('src')) capImg.src='/captcha?t='+Date.now();
   var form=wrap.querySelector('form'); if(!form) return;
   form.querySelector('input[name=parent_id]').value=rid;
+  form.querySelector('input[name=reply_target]').value=q.get('rtarget')||rid;
   form.querySelector('input[name=reply_to]').value=name;
   var cancel=document.getElementById('cancel-reply-'+memoId);
   if(cancel) cancel.style.display='';
@@ -352,6 +354,7 @@ function cancelReply(memoId){
   var form=document.querySelector('#cmt-form-'+memoId+' form');
   if(!form) return;
   form.querySelector('input[name=parent_id]').value='0';
+  form.querySelector('input[name=reply_target]').value='0';
   form.querySelector('input[name=reply_to]').value='';
   document.getElementById('cancel-reply-'+memoId).style.display='none';
   var ta=form.querySelector('textarea');
@@ -600,8 +603,8 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
         c.admin_only && !isAdmin
           ? `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}：<span class="ao-hidden">🔒 隐藏评论</span></div>`
           : `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${isAdmin
-          ? `<button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${c.parent_id || c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>`
-          : `<a class="reply-btn" href="/memo/${memo.id}?reply=${c.parent_id || c.id}&rname=${encodeURIComponent(c.name)}#comments" title="回复" aria-label="回复"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></a>`}${delCmtBtn(c)}</div>`;
+          ? `<button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${c.parent_id || c.id},${c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>`
+          : `<a class="reply-btn" href="/memo/${memo.id}?reply=${c.parent_id || c.id}&rtarget=${c.id}&rname=${encodeURIComponent(c.name)}#comments" title="回复" aria-label="回复"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></a>`}${delCmtBtn(c)}</div>`;
       const first = comments.slice(0, 2).map(line).join('');
       const rest = comments.slice(2);
       const restHtml = rest.length
@@ -622,7 +625,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     const row = (c, rootId) =>
       c.admin_only && !isAdmin
         ? `<div class="cmt">${cmtAvatar(c)}${cmtName(c)}：<span class="ao-hidden">🔒 隐藏评论</span><span class="when">${timeAgo(c.created_at)}</span></div>`
-        : `<div class="cmt">${cmtAvatar(c)}${cmtName(c)}${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}</div>`;
+        : `<div class="cmt">${cmtAvatar(c)}${cmtName(c)}${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId},${c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}</div>`;
     cmtHtml = `<div class="cmt-box">${roots
       .map((r) => row(r, r.id) + (byParent.get(r.id) || []).map((c) => `<div class="replies">${row(c, r.id)}</div>`).join(''))
       .join('')}</div>`;
@@ -649,6 +652,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
             <input type="hidden" name="ft" value="${Math.floor(Date.now() / 1000)}">
             <input type="hidden" name="parent_id" value="0">
             <input type="hidden" name="reply_to" value="">
+            <input type="hidden" name="reply_target" value="0">
             ${identityHtml}${capRow}
             <textarea name="content" rows="3" maxlength="${user || isAdmin ? 80 : 50}" data-ph="写下你的评论（最多 ${user || isAdmin ? 80 : 50} 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" placeholder="写下你的评论（最多 ${user || isAdmin ? 80 : 50} 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" required></textarea>
             <div class="btn-row"><button class="btn" type="submit">发表评论</button><button class="btn ghost" type="button" id="cancel-reply-${memo.id}" style="display:none" onclick="cancelReply(${memo.id})">取消回复</button>${isAdmin ? '' : `<label class="ao-check"><input type="checkbox" name="admin_only" value="1">仅管理员可见</label>`}<button class="emoji-toggle" type="button" title="插入表情" onclick="toggleEmoji(${memo.id})">😊</button></div>

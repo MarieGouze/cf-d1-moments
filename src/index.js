@@ -305,14 +305,17 @@ async function commentPost(env, request, id) {
   // 字数上限：注册用户与站长 80 字，游客 50 字
   const content = String(form.get('content') || '').trim().slice(0, user || adminReq ? 80 : 50);
   if (!content) return redirect(`${back}?c=empty`);
-  // 回复：parent_id 必须指向同一动态下已通过的评论，reply_to 以库中昵称为准
+  // 回复：以被点的那条评论（reply_target）为准取昵称（库中为准、防伪造），parent 仍挂到它所属的顶层评论下；
+  // 老表单没有 reply_target 时退回 parent_id（@ 的就是顶层作者）
   let parentId = 0;
   let replyTo = '';
+  const wantTarget = parseInt(String(form.get('reply_target') || '0'), 10);
   const wantParent = parseInt(String(form.get('parent_id') || '0'), 10);
-  if (wantParent > 0) {
+  const pick = wantTarget > 0 ? wantTarget : wantParent;
+  if (pick > 0) {
     const p = await env.DB.prepare(
       "SELECT id, parent_id, name FROM comments WHERE id = ? AND memo_id = ? AND status='approved'"
-    ).bind(wantParent, id).first();
+    ).bind(pick, id).first();
     if (p) {
       parentId = p.parent_id ? p.parent_id : p.id;
       replyTo = p.name;
