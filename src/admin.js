@@ -64,6 +64,9 @@ td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left;vertical-alig
 .tc-hl{background:#fff3a3;padding:0 3px;border-radius:3px}
 .tb-on{background:#dde3ee !important}
 .emoji-panel{padding:8px;border-bottom:1px solid #eee}
+.link-panel{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px;border-bottom:1px solid #eee;background:#fafafa}
+.link-panel input{flex:1;min-width:130px;width:auto;margin:0;padding:7px 9px}
+.link-panel .btn{padding:6px 12px}
 .emoji-btn{background:none;border:0;font-size:18px;cursor:pointer;padding:3px}
 .editor-body{min-height:150px;padding:12px;font-size:15px;line-height:1.65;outline:none}
 .editor-body:empty:before{content:attr(data-placeholder);color:#aaa}
@@ -407,6 +410,7 @@ function memoForm(memo, settings) {
         <button type="button" id="hr-btn" title="分隔线">―</button>
       </div>
       <div id="emoji-panel" class="emoji-panel" hidden>${emojiButtons}</div>
+      <div id="link-panel" class="link-panel" hidden><input id="link-text" placeholder="显示文字"><input id="link-url" placeholder="链接地址 https://…"><button type="button" class="btn" id="link-ok">确定</button><button type="button" class="btn ghost" id="link-unlink" hidden>删链接</button><button type="button" class="btn ghost" id="link-cancel">取消</button></div>
       <div id="editor" class="editor-body" contenteditable="true" data-placeholder="这一刻的想法…">${initialHtml}</div>
       <textarea id="source-area" class="source-area" hidden placeholder="HTML 源码"></textarea>
       <textarea name="content_md" id="content-md" hidden></textarea>
@@ -493,12 +497,67 @@ function memoForm(memo, settings) {
       if (!document.execCommand('hiliteColor', false, e.target.value)) document.execCommand('backColor', false, e.target.value);
       editor.focus(); saveRange();
     });
+    var linkPanel = document.getElementById('link-panel');
+    var linkText = document.getElementById('link-text');
+    var linkUrl = document.getElementById('link-url');
+    var linkUnlink = document.getElementById('link-unlink');
+    var editingA = null;
+    function findLink(node){
+      var n = node;
+      while (n && n !== editor) { if (n.nodeType === 1 && n.tagName === 'A') return n; n = n.parentNode; }
+      return null;
+    }
     document.getElementById('link-btn').addEventListener('click', function(){
-      var url = prompt('链接地址', 'https://');
-      if (!url) return;
-      if (savedRange && !savedRange.collapsed) exec('createLink', url);
-      else insertHtml('<a href="' + url.replace(/"/g, '&quot;') + '">' + url + '</a>');
+      if (sourceMode) { alert('源码模式下请直接编辑 HTML 里的链接'); return; }
+      saveRange();
+      editingA = savedRange ? findLink(savedRange.startContainer) : null;
+      if (editingA) {
+        linkText.value = editingA.textContent;
+        linkUrl.value = editingA.getAttribute('href') || '';
+        linkUnlink.hidden = false;
+      } else {
+        linkText.value = (savedRange && !savedRange.collapsed) ? savedRange.toString() : '';
+        linkUrl.value = 'https://';
+        linkUnlink.hidden = true;
+      }
+      linkPanel.hidden = false;
+      linkText.focus();
     });
+    document.getElementById('link-ok').addEventListener('click', function(){
+      var url = linkUrl.value.trim();
+      var text = linkText.value.trim();
+      if (!url) { linkPanel.hidden = true; editingA = null; return; }
+      if (!text) text = url;
+      if (editingA) {
+        editingA.setAttribute('href', url);
+        editingA.textContent = text;
+      } else {
+        var a = document.createElement('a');
+        a.setAttribute('href', url);
+        a.textContent = text;
+        restoreRange();
+        var sel = window.getSelection();
+        if (sel.rangeCount) {
+          var rg = sel.getRangeAt(0);
+          rg.deleteContents();
+          rg.insertNode(a);
+          rg.setStartAfter(a); rg.setEndAfter(a);
+          sel.removeAllRanges(); sel.addRange(rg);
+        } else editor.appendChild(a);
+      }
+      editingA = null;
+      linkPanel.hidden = true;
+      editor.focus(); saveRange();
+    });
+    linkUnlink.addEventListener('click', function(){
+      if (editingA && editingA.parentNode) {
+        editingA.parentNode.replaceChild(document.createTextNode(editingA.textContent), editingA);
+        editingA = null;
+      }
+      linkPanel.hidden = true;
+      editor.focus(); saveRange();
+    });
+    document.getElementById('link-cancel').addEventListener('click', function(){ linkPanel.hidden = true; editingA = null; });
     document.getElementById('image-btn').addEventListener('click', function(){
       var url = prompt('图片地址（https://…）', '');
       if (url) exec('insertImage', url);
