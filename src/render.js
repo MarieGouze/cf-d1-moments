@@ -304,6 +304,8 @@ function fitDy(){
     w.style.height=(640*s)+'px';
   });
 }
+// 从消息/详情页按返回回到时间线时，浏览器可能直接恢复冻结的旧页面快照（bfcache），新回复看不见：恢复时强制刷新一次拿最新
+window.addEventListener('pageshow', function(e){ if (e.persisted) location.reload(); });
 document.addEventListener('DOMContentLoaded', fitDy);
 window.addEventListener('resize', fitDy);
 window.addEventListener('load', fitDy);

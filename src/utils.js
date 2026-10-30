@@ -87,7 +87,8 @@ export function redirect(location, extraHeaders = {}) {
 export function htmlResponse(html, status = 200, extraHeaders = {}) {
   return new Response(html, {
     status,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', ...extraHeaders },
+    // 页面内容（评论/私信/通知）变化频繁：不让浏览器启发式缓存旧页面，每次都回服务器拿最新
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'private, no-cache', ...extraHeaders },
   });
 }
 
