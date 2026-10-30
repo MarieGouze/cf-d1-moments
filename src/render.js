@@ -144,6 +144,35 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .ao-hidden{color:#d97706;font-weight:600}
 .bell{position:relative;font-size:15px}
 .nbadge{position:absolute;top:-2px;right:-6px;background:#e5484d;color:#fff;font-size:10px;font-weight:700;line-height:1;padding:2px 5px;border-radius:999px;min-width:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.35)}
+.dm-link{text-decoration:none;cursor:pointer}
+.cmt .dm-link,.cmt-line .dm-link{color:var(--accent);font-weight:600}
+.dm-mask{position:fixed;inset:0;background:rgba(10,14,24,.55);display:none;align-items:center;justify-content:center;z-index:120;padding:16px}
+.dm-mask.open{display:flex}
+.dm-box{background:var(--card);color:var(--text);border-radius:14px;max-width:420px;width:100%;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.3)}
+.dm-box h3{margin:0 0 10px;font-size:16px}
+.dm-box textarea,.th-form textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text);font-size:14px;font-family:inherit;min-height:84px}
+.dm-box .row,.th-form .row{display:flex;gap:8px;align-items:flex-start;margin-top:8px}
+.dm-box .row input,.th-form .row input{flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text);font-size:14px}
+.dm-box img.cap,.th-form img.cap{height:40px;border-radius:6px;cursor:pointer;border:1px solid var(--line)}
+.dm-err{color:#e5484d;font-size:13px;min-height:18px;margin-top:6px}
+.msg-row{display:flex;margin:8px 0}
+.msg-row.me{justify-content:flex-end}
+.msg-bub{max-width:78%;padding:8px 12px;border-radius:12px;background:var(--chip);font-size:14px;line-height:1.55;word-break:break-word}
+.msg-row.me .msg-bub{background:var(--accent);color:#fff}
+.fr-item{border-bottom:1px dashed var(--line)}
+.fr-item:last-child{border-bottom:none}
+.fr-bar{display:flex;align-items:center;gap:12px;width:100%;background:none;border:none;padding:14px 6px;cursor:pointer;color:var(--text);font-size:15px;text-align:left;font-family:inherit;border-radius:8px;transition:background .15s}
+.fr-bar:hover{background:var(--chip)}
+.fr-bar.open{background:var(--chip)}
+.fr-bar .fr-t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;letter-spacing:.2px}
+.fr-bar .fr-pin{margin-right:5px;font-size:12px}
+.fr-bar .fr-meta{font-size:12px;color:var(--sub);white-space:nowrap;font-weight:400}
+.fr-bar .fr-arrow{color:var(--sub);font-size:13px;transition:transform .18s;flex:none}
+.fr-bar.open .fr-arrow{transform:rotate(180deg)}
+.fr-body{padding:4px 0 10px}
+.fr-body .memo{border-bottom:none;padding-bottom:2px}
+.msg-when{font-size:11px;color:var(--sub);margin:2px 2px 0}
+.msg-row.me .msg-when{text-align:right}
 .ntf-head{font-size:16px;font-weight:700;padding:10px 0 6px}
 .ntf{display:flex;align-items:baseline;gap:8px;padding:10px 2px;border-bottom:1px dashed var(--line);color:var(--text);font-size:14px;text-decoration:none}
 .ntf:last-child{border-bottom:0}
@@ -319,6 +348,47 @@ function cancelReply(memoId){
   ta.placeholder=ta.getAttribute('data-ph')||'写下你的评论';
 }
 function refreshCap(img){ img.src='/captcha?t='+Date.now(); }
+function toggleForum(btn){
+  var item=btn.closest('.fr-item'); if(!item) return;
+  var body=item.querySelector('.fr-body');
+  var willOpen=body.hasAttribute('hidden');
+  document.querySelectorAll('.fr-body').forEach(function(b){ b.setAttribute('hidden',''); });
+  document.querySelectorAll('.fr-bar.open').forEach(function(b){ b.classList.remove('open'); });
+  if(willOpen){ body.removeAttribute('hidden'); btn.classList.add('open'); }
+}
+function openDm(uid, name){
+  var m=document.getElementById('dm-mask'); if(!m) return;
+  document.getElementById('dm-to').value=uid;
+  document.getElementById('dm-title').textContent='私信给 '+name;
+  document.getElementById('dm-err').textContent='';
+  document.getElementById('dm-text').value='';
+  var cap=document.getElementById('dm-cap'); if(cap) cap.value='';
+  var img=document.getElementById('dm-cap-img'); if(img) img.src='/captcha?t='+Date.now();
+  m.classList.add('open');
+  document.getElementById('dm-text').focus();
+}
+function closeDm(){ var m=document.getElementById('dm-mask'); if(m) m.classList.remove('open'); }
+document.addEventListener('click', function(e){
+  var t=e.target && e.target.closest ? e.target.closest('[data-dm]') : null;
+  if(t) openDm(t.getAttribute('data-dm'), t.getAttribute('data-dmname') || '');
+});
+async function sendDm(){
+  var err=document.getElementById('dm-err');
+  var fd=new URLSearchParams();
+  fd.set('to', document.getElementById('dm-to').value);
+  fd.set('content', document.getElementById('dm-text').value.trim());
+  fd.set('ajax', '1');
+  var cap=document.getElementById('dm-cap'); if(cap) fd.set('captcha', cap.value);
+  try{
+    var r=await fetch('/dm/send', {method:'POST', body: fd});
+    var d=await r.json();
+    if(d && d.ok){ closeDm(); }
+    else{
+      err.textContent=(d && d.error) || '发送失败';
+      var img=document.getElementById('dm-cap-img'); if(img) img.src='/captcha?t='+Date.now();
+    }
+  }catch(e){ err.textContent='发送失败，请重试'; }
+}
 async function likeMemo(id,btn){
   try{
     var r=await fetch('/memo/'+id+'/like',{method:'POST'});
@@ -433,7 +503,7 @@ function contentHtml(memo, detail) {
   return renderContent(memo.content_md);
 }
 
-export function memoCard(memo, settings, { comments = [], liked = false, detail = false, isAdmin = false, user = null, userAvatars = {}, filesUnlocked = false, pwLocked = false, membersLocked = false, unlockErr = '', dlCounts = {} } = {}) {
+export function memoCard(memo, settings, { comments = [], liked = false, detail = false, isAdmin = false, user = null, userAvatars = {}, userIds = {}, filesUnlocked = false, pwLocked = false, membersLocked = false, unlockErr = '', dlCounts = {}, forum = false } = {}) {
   const media = parseJsonSafe(memo.media, []);
   const tags = String(memo.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
   const avatarStyle = settings.avatar_url
@@ -449,6 +519,22 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     : avatarStyle;
   const cardAvatarInner = isUserPost ? (memo.author_avatar ? '' : esc((memo.author_name || '游').slice(0, 1))) : avatarInner;
   const cardNick = isUserPost ? esc(memo.author_name || '') : esc(settings.nickname);
+  // 私信入口：登录者（或站长）看别人名字时可点开发私信弹窗；自己、游客名、未登录时只是普通文字
+  const canDm = isAdmin || !!user;
+  const dmLink = (name, uid) => {
+    if (!canDm || uid === null || uid === undefined) return null;
+    if (isAdmin && uid === 0) return null;
+    if (user && uid === user.id) return null;
+    return `<a class="n dm-link" href="javascript:void(0)" data-dm="${uid}" data-dmname="${esc(name)}">${esc(name)}</a>`;
+  };
+  const nickHtml = (() => {
+    const link = dmLink(isUserPost ? (memo.author_name || '') : (settings.nickname || ''), isUserPost ? memo.author_id : 0);
+    return link || cardNick;
+  })();
+  const cmtName = (c) => {
+    const uid = c.name === settings.nickname ? 0 : (userIds[c.name] !== undefined ? userIds[c.name] : null);
+    return dmLink(c.name, uid) || `<span class="n">${esc(c.name)}</span>`;
+  };
   // 列表页：默认显示前 2 条评论（无框、纯文字行），超过 2 条时追加「共 XX 条评论，点击查看全部」
   // 详情页：显示全部评论（带回复层级）
   let cmtHtml = '';
@@ -476,8 +562,8 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     if (comments.length || total > 0) {
       const line = (c) =>
         c.admin_only && !isAdmin
-          ? `<div class="cmt-line">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>：<span class="ao-hidden">🔒 隐藏评论</span></div>`
-          : `<div class="cmt-line">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${isAdmin
+          ? `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}：<span class="ao-hidden">🔒 隐藏评论</span></div>`
+          : `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${isAdmin
           ? `<button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${c.parent_id || c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>`
           : `<a class="reply-btn" href="/memo/${memo.id}?reply=${c.parent_id || c.id}&rname=${encodeURIComponent(c.name)}#comments" title="回复" aria-label="回复"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></a>`}${delCmtBtn(c)}</div>`;
       const first = comments.slice(0, 2).map(line).join('');
@@ -499,8 +585,8 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     }
     const row = (c, rootId) =>
       c.admin_only && !isAdmin
-        ? `<div class="cmt">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>：<span class="ao-hidden">🔒 隐藏评论</span><span class="when">${timeAgo(c.created_at)}</span></div>`
-        : `<div class="cmt">${cmtAvatar(c)}<span class="n">${esc(c.name)}</span>${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}</div>`;
+        ? `<div class="cmt">${cmtAvatar(c)}${cmtName(c)}：<span class="ao-hidden">🔒 隐藏评论</span><span class="when">${timeAgo(c.created_at)}</span></div>`
+        : `<div class="cmt">${cmtAvatar(c)}${cmtName(c)}${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}</div>`;
     cmtHtml = `<div class="cmt-box">${roots
       .map((r) => row(r, r.id) + (byParent.get(r.id) || []).map((c) => `<div class="replies">${row(c, r.id)}</div>`).join(''))
       .join('')}</div>`;
@@ -534,11 +620,11 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
           </form>
         </div>`
       : '';
-  return `<article class="memo">
+  const cardHtml = `<article class="memo">
     <div class="memo-head">
       <div class="${cardAvatarCls}" ${cardAvatarStyle}>${cardAvatarInner}</div>
       <div>
-        <div class="m-nick">${cardNick}${memo.pinned ? `<span class="pin">${'⭐'.repeat(memo.pinned)} 置顶</span>` : ''}${memo.hidden && isAdmin ? '<span class="pin" style="color:#999">🔒 隐藏</span>' : ''}${memo.view_password_hash && isAdmin ? '<span class="pin">🔑 密码</span>' : ''}${memo.members_only && isAdmin ? '<span class="pin">👥 仅注册用户</span>' : ''}</div>
+        <div class="m-nick">${nickHtml}${memo.pinned ? `<span class="pin">${'⭐'.repeat(memo.pinned)} 置顶</span>` : ''}${memo.hidden && isAdmin ? '<span class="pin" style="color:#999">🔒 隐藏</span>' : ''}${memo.view_password_hash && isAdmin ? '<span class="pin">🔑 密码</span>' : ''}${memo.members_only && isAdmin ? '<span class="pin">👥 仅注册用户</span>' : ''}</div>
       </div>
     </div>
     <div class="m-body">
@@ -571,6 +657,13 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     </div>
     <div id="comments">${cmtHtml}${cmtForm}</div>
   </article>`;
+  if (!forum || detail) return cardHtml;
+  // 论坛模式：整卡收拢成一行标题条（标题优先，无标题时用正文首行摘要顶替），点开才露出完整卡片
+  const firstLine = String(memo.content_md || '').split('\n').map((x) => x.trim()).find((x) => x) || '';
+  const plainFirst = firstLine.replace(/[#>*`\-\\[\]()!|]/g, '').trim();
+  const barTitle = memo.title || plainFirst.slice(0, 60) || (media.length ? '📎 图文动态' : '（无标题）');
+  const barAuthor = isUserPost ? (memo.author_name || '') : (settings.nickname || '');
+  return `<div class="fr-item"><button type="button" class="fr-bar" onclick="toggleForum(this)"><span class="fr-t">${memo.pinned ? `<span class="fr-pin">${'⭐'.repeat(memo.pinned)}</span>` : ''}${esc(barTitle)}</span><span class="fr-meta">${esc(barAuthor)} · ${timeAgo(memo.created_at)} · ❤ ${memo.like_count || 0} · 💬 ${memo.comment_count || 0}</span><span class="fr-arrow">▾</span></button><div class="fr-body" hidden>${cardHtml}</div></div>`;
 }
 
 export function layout(settings, { title, body, activeTag = '', adminView = false, user = null, notifCount = 0 }) {
@@ -609,9 +702,9 @@ export function layout(settings, { title, body, activeTag = '', adminView = fals
     <a class="tb-btn${!activeTag ? ' on' : ''}" href="/" title="首页" aria-label="首页"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></a>
     <span class="spacer"></span>
     ${!adminView ? (user
-      ? `${settings.users_can_post === '1' ? '<a class="tb-btn" href="/post/new" title="发布动态" aria-label="发布动态"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></a>' : ''}<a class="tb-link bell" href="/notifications" title="通知提醒" aria-label="通知提醒">🔔${notifCount ? `<span class="nbadge">${notifCount > 99 ? '99+' : notifCount}</span>` : ''}</a><span class="tb-user">${user.avatar ? `<img src="${esc(user.avatar)}" alt="" style="width:20px;height:20px;border-radius:50%;vertical-align:-5px;margin-right:4px">` : '👤 '}${esc(user.username)}</span><a class="tb-link" href="/logout">退出</a>`
+      ? `${settings.users_can_post === '1' ? '<a class="tb-btn" href="/post/new" title="发布动态" aria-label="发布动态"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></a>' : ''}<a class="tb-link bell" href="/notifications" title="通知提醒" aria-label="通知提醒">🔔${notifCount ? `<span class="nbadge">${notifCount > 99 ? '99+' : notifCount}</span>` : ''}</a><a class="tb-link" href="/messages">私信</a><span class="tb-user">${user.avatar ? `<img src="${esc(user.avatar)}" alt="" style="width:20px;height:20px;border-radius:50%;vertical-align:-5px;margin-right:4px">` : '👤 '}${esc(user.username)}</span><a class="tb-link" href="/logout">退出</a>`
       : `<a class="tb-link" href="/login">登录</a>${settings.registration_open === '1' ? '<a class="tb-link" href="/register">注册</a>' : ''}`) : ''}
-    ${adminView ? '<a class="tb-btn" href="/admin/memos/new" title="发布" aria-label="发布"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></a><a class="tb-btn" href="/admin/logout" title="退出" aria-label="退出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12v.01"/><path d="M13 4.6v15.6a1 1 0 0 1-1.2 1L5 20V5.6a2 2 0 0 1 1.5-1.9l4-1A2 2 0 0 1 13 4.6Z"/></svg></a>' : ''}
+    ${adminView ? '<a class="tb-link" href="/messages">私信</a><a class="tb-btn" href="/admin/memos/new" title="发布" aria-label="发布"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></a><a class="tb-btn" href="/admin/logout" title="退出" aria-label="退出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12v.01"/><path d="M13 4.6v15.6a1 1 0 0 1-1.2 1L5 20V5.6a2 2 0 0 1 1.5-1.9l4-1A2 2 0 0 1 13 4.6Z"/></svg></a>' : ''}
   </div>
   </div>
  </div>
@@ -619,6 +712,16 @@ export function layout(settings, { title, body, activeTag = '', adminView = fals
   <div class="foot-note"><a class="admin-link" href="/admin" title="进入后台">${esc(settings.site_name)}</a> · 记录生活，留住瞬间<br>Powered by v${VERSION} @TaoGe&nbsp;&nbsp;<a class="foot-gh" href="https://github.com/sandeli/cf-d1-moments" target="_blank" rel="noopener"><img class="gh-ico" src="/media/site/gh.png" alt="GitHub">cf-d1-moments</a>${(settings.site_days_text || settings.visitor_text) ? `<br>${[settings.site_days_text, settings.visitor_text].filter(Boolean).join(' · ')}` : ''}${settings.r2_usage_text ? `<br>${esc(settings.r2_usage_text)}` : ''}${settings.acct_usage_text ? `<br>${esc(settings.acct_usage_text)}` : ''}</div>
 </div>
 <div class="lightbox" id="lightbox" onclick="closeLightbox()"><img id="lightbox-img" alt=""></div>
+${(user || adminView) ? `<div class="dm-mask" id="dm-mask" onclick="if(event.target===this)closeDm()">
+ <div class="dm-box">
+  <h3 id="dm-title">私信</h3>
+  <input type="hidden" id="dm-to" value="">
+  <textarea id="dm-text" maxlength="200" placeholder="写下你想说的话（最多 200 字）"></textarea>
+  ${adminView ? '' : '<div class="row"><img class="cap" id="dm-cap-img" alt="验证码" title="点图刷新" onclick="refreshCap(this)"><input id="dm-cap" maxlength="4" placeholder="验证码"></div>'}
+  <div class="dm-err" id="dm-err"></div>
+  <div class="btn-row" style="margin-top:6px"><button class="btn" type="button" onclick="sendDm()">发送</button><button class="btn ghost" type="button" onclick="closeDm()">取消</button></div>
+ </div>
+</div>` : ''}
 <script>${JS}</script>
 </body>
 </html>`;

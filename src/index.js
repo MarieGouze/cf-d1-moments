@@ -164,17 +164,21 @@ async function viewUnlocked(env, request, memo, settings, adminView) {
   return cookies['mm_view_' + memo.id] === token;
 }
 
-// 评论里注册用户绑定的头像映射（username -> 头像路径），供评论区显示其注册头像
-async function avatarMapFor(env, comments) {
+// 评论里注册用户的头像与 id 映射（username -> 头像路径 / 用户 id），供评论区显示头像、私信入口定位收信人
+async function userMapsFor(env, comments) {
   const names = [...new Set((comments || []).map((c) => c.name).filter(Boolean))];
-  if (!names.length) return {};
+  const avatars = {};
+  const ids = {};
+  if (!names.length) return { avatars, ids };
   const ph = names.map(() => '?').join(',');
   const { results } = await env.DB.prepare(
-    `SELECT username, avatar FROM users WHERE username IN (${ph})`
+    `SELECT id, username, avatar FROM users WHERE username IN (${ph})`
   ).bind(...names).all();
-  const map = {};
-  for (const r of results || []) if (r.avatar) map[r.username] = r.avatar;
-  return map;
+  for (const r of results || []) {
+    if (r.avatar) avatars[r.username] = r.avatar;
+    ids[r.username] = r.id;
+  }
+  return { avatars, ids };
 }
 
 async function homePage(env, request, url, { tag = '' } = {}) {
@@ -192,10 +196,10 @@ async function homePage(env, request, url, { tag = '' } = {}) {
   const commentsList = await Promise.all(
     memos.map((m, i) => (viewOk[i] && !mLocked[i] ? approvedComments(env, m.id, 500, adminView) : Promise.resolve([])))
   );
-  const userAvatars = await avatarMapFor(env, commentsList.flat());
+  const { avatars: userAvatars, ids: userIds } = await userMapsFor(env, commentsList.flat());
   const dlCounts = await downloadCounts(env, memos);
   const cards = memos.map((m, i) =>
-    memoCard(m, settings, { comments: commentsList[i], liked: liked.has(m.id), isAdmin: adminView, user, userAvatars, filesUnlocked: unlocked.has(m.id), pwLocked: !viewOk[i], membersLocked: mLocked[i], dlCounts })
+    memoCard(m, settings, { comments: commentsList[i], liked: liked.has(m.id), isAdmin: adminView, user, userAvatars, userIds, filesUnlocked: unlocked.has(m.id), pwLocked: !viewOk[i], membersLocked: mLocked[i], dlCounts, forum: settings.forum_mode === '1' })
   );
   const base = tag ? `/tag/${encodeURIComponent(tag)}` : '/';
   const announce = (settings.announce_text || '').trim();
@@ -239,9 +243,9 @@ async function memoDetail(env, request, id) {
       unlockErr = `密码不对，请重试。${n ? `（已错 ${escapeXml(n)} 次，错满 5 次将暂停 10 分钟）` : ''}`;
     }
   }
-  const userAvatars = await avatarMapFor(env, comments);
+  const { avatars: userAvatars, ids: userIds } = await userMapsFor(env, comments);
   const dlCounts = await downloadCounts(env, [memo]);
-  const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, user, userAvatars, filesUnlocked: unlocked.has(id), pwLocked: !viewOk, membersLocked, unlockErr, dlCounts })}</div>
+  const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, user, userAvatars, userIds, filesUnlocked: unlocked.has(id), pwLocked: !viewOk, membersLocked, unlockErr, dlCounts })}</div>
     <div class="pager"><a href="/">← 回到时间线</a></div>`;
   const pageTitle = memo.title || (viewOk && !membersLocked ? plainTextExcerpt(memo.content_md, 40) : '') || settings.site_name;
   const notifCount = user ? await unreadNotifCount(env, user.id) : 0;
@@ -380,8 +384,10 @@ async function notificationsPage(env, request) {
   const rows = results || [];
   await env.DB.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0').bind(user.id).run();
   const items = rows.map((n) => {
-    const verb = n.type === 'reply' ? '回复了你' : '评论了你的动态';
-    return `<a class="ntf${n.is_read ? '' : ' unread'}" href="/memo/${n.memo_id}">
+    const isDm = n.type === 'dm';
+    const verb = isDm ? '给你发了私信' : n.type === 'reply' ? '回复了你' : '评论了你的动态';
+    // 私信通知的 memo_id 存的是发信人 id（站长为 0），点开直达与他的对话页
+    return `<a class="ntf${n.is_read ? '' : ' unread'}" href="${isDm ? `/messages/${n.memo_id}` : `/memo/${n.memo_id}`}">
       <span class="ntf-dot"></span>
       <span class="ntf-main"><b>${escapeXml(n.actor)}</b> ${verb}：${escapeXml(n.excerpt)}</span>
       <span class="ntf-when">${timeAgo(n.created_at)}</span>
@@ -390,6 +396,123 @@ async function notificationsPage(env, request) {
   const body = `<div class="feed-box"><div class="ntf-head">🔔 通知提醒</div>${items || '<div class="memo">暂时没有通知。有人回复你的评论、或评论你发的动态时，会出现在这里。</div>'}</div>
     <div class="pager"><a href="/">← 回到时间线</a></div>`;
   return htmlResponse(layout(await withUsage(env, settings), { title: `通知 · ${settings.site_name}`, body, user, notifCount: 0 }));
+}
+
+// ---------------- 私信（注册用户互发 + 与站长往返） ----------------
+// 身份：站长为 id 0（名字用站长昵称），注册用户用 users.id；游客不能发也不能收。
+async function dmIdentity(env, request) {
+  const settings = await getSettings(env);
+  if (await isAdmin(env, request)) return { me: { id: 0, name: settings.nickname || '主人' }, settings, adminReq: true, user: null };
+  const user = await currentUser(env, request);
+  if (user) return { me: { id: user.id, name: user.username }, settings, adminReq: false, user };
+  return null;
+}
+
+async function dmSend(env, request) {
+  const form = await request.formData().catch(() => null);
+  const ajax = !!form && form.get('ajax') === '1';
+  const back = (form && String(form.get('back') || '')) || '/messages';
+  const fail = (msg, status = 400) => ajax
+    ? Response.json({ error: msg }, { status })
+    : redirect(back + (back.includes('?') ? '&' : '?') + 'e=' + encodeURIComponent(msg));
+  const ident = await dmIdentity(env, request);
+  if (!ident) return ajax ? Response.json({ error: '请先登录' }, { status: 403 }) : redirect('/login?next=/messages');
+  if (!form) return fail('提交失败');
+  const to = parseInt(String(form.get('to') || ''), 10);
+  const content = String(form.get('content') || '').trim().slice(0, 200);
+  if (!content) return fail('内容不能为空');
+  if (!Number.isFinite(to) || to < 0) return fail('收信人不对');
+  if (to === ident.me.id) return fail('不能给自己发私信');
+  let toName;
+  if (to === 0) {
+    toName = ident.settings.nickname || '主人';
+  } else {
+    const u = await env.DB.prepare('SELECT id, username, status FROM users WHERE id = ?').bind(to).first();
+    if (!u || u.status) return fail('对方账号不存在或已停用');
+    toName = u.username;
+  }
+  const now = nowSec();
+  if (!ident.adminReq) {
+    // 普通用户每封都要过图形验证码（用户指定），并限制频率防骚扰
+    const cookies = parseCookies(request);
+    const okCap = await verifyCaptcha(ident.settings.site_secret, cookies.mm_captcha, form.get('captcha'));
+    if (!okCap) return fail('验证码不对');
+    const recent = await env.DB.prepare('SELECT COUNT(*) AS c FROM messages WHERE from_id = ? AND created_at > ?').bind(ident.me.id, now - 60).first();
+    if (recent && recent.c >= 5) return fail('发送太频繁，请稍后再试');
+  }
+  await env.DB.prepare('INSERT INTO messages (from_id, from_name, to_id, to_name, content, created_at) VALUES (?,?,?,?,?,?)')
+    .bind(ident.me.id, ident.me.name, to, toName, content, now).run();
+  // 给注册用户收信人塞一条铃铛通知（站长没有前台铃铛，直接在私信页看）
+  if (to > 0) {
+    await env.DB.prepare('INSERT INTO notifications (user_id, type, memo_id, comment_id, actor, excerpt, created_at) VALUES (?,?,?,?,?,?,?)')
+      .bind(to, 'dm', ident.me.id, 0, ident.me.name, content.slice(0, 60), now).run();
+  }
+  return ajax ? Response.json({ ok: true }) : redirect(back);
+}
+
+async function messagesPage(env, request) {
+  const ident = await dmIdentity(env, request);
+  if (!ident) return redirect('/login?next=/messages');
+  const meId = ident.me.id;
+  const { results } = await env.DB.prepare(
+    'SELECT from_id, from_name, to_id, to_name, content, is_read, created_at FROM messages WHERE from_id = ? OR to_id = ? ORDER BY id DESC LIMIT 300'
+  ).bind(meId, meId).all();
+  const convs = new Map();
+  for (const m of results || []) {
+    const oid = m.from_id === meId ? m.to_id : m.from_id;
+    const oname = m.from_id === meId ? m.to_name : m.from_name;
+    if (!convs.has(oid)) convs.set(oid, { oid, oname, last: m, unread: 0 });
+    if (m.to_id === meId && !m.is_read) convs.get(oid).unread += 1;
+  }
+  const items = [...convs.values()].map((c) => `<a class="ntf${c.unread ? ' unread' : ''}" href="/messages/${c.oid}">
+      <span class="ntf-dot"></span>
+      <span class="ntf-main"><b>${escapeXml(c.oname)}</b>：${escapeXml(String(c.last.content).slice(0, 40))}${c.unread ? ` <span class="ao-tag">${c.unread} 条未读</span>` : ''}</span>
+      <span class="ntf-when">${timeAgo(c.last.created_at)}</span>
+    </a>`).join('');
+  const body = `<div class="feed-box"><div class="ntf-head">✉️ 私信</div>${items || '<div class="memo">还没有私信。在评论区或动态上点对方的名字，就能给 TA 发私信。</div>'}</div>
+    <div class="pager"><a href="/">← 回到时间线</a></div>`;
+  const notifCount = ident.user ? await unreadNotifCount(env, ident.user.id) : 0;
+  return htmlResponse(layout(await withUsage(env, ident.settings), { title: `私信 · ${ident.settings.site_name}`, body, adminView: ident.adminReq, user: ident.user, notifCount }));
+}
+
+async function threadPage(env, request, otherId) {
+  const ident = await dmIdentity(env, request);
+  if (!ident) return redirect('/login?next=/messages');
+  const meId = ident.me.id;
+  if (otherId === meId) return redirect('/messages');
+  let otherName;
+  if (otherId === 0) {
+    otherName = ident.settings.nickname || '主人';
+  } else {
+    const u = await env.DB.prepare('SELECT username FROM users WHERE id = ?').bind(otherId).first();
+    if (!u) return redirect('/messages');
+    otherName = u.username;
+  }
+  const { results } = await env.DB.prepare(
+    'SELECT from_id, content, created_at FROM messages WHERE (from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?) ORDER BY id ASC LIMIT 200'
+  ).bind(meId, otherId, otherId, meId).all();
+  await env.DB.prepare('UPDATE messages SET is_read = 1 WHERE to_id = ? AND from_id = ? AND is_read = 0').bind(meId, otherId).run();
+  const bubbles = (results || []).map((m) => {
+    const mine = m.from_id === meId;
+    return `<div class="msg-row${mine ? ' me' : ''}"><div><div class="msg-bub">${escapeXml(m.content)}</div><div class="msg-when">${timeAgo(m.created_at)}</div></div></div>`;
+  }).join('');
+  const url = new URL(request.url);
+  const err = url.searchParams.get('e');
+  const capRow = ident.adminReq ? '' : `<div class="row"><img class="cap" alt="验证码" title="点图刷新" onclick="refreshCap(this)" src="/captcha?t=${Date.now()}">
+              <input name="captcha" maxlength="4" placeholder="验证码" required style="max-width:110px"></div>`;
+  const body = `<div class="feed-box"><div class="ntf-head">与 ${escapeXml(otherName)} 的私信</div>
+    ${err ? `<div class="notice">${escapeXml(err)}</div>` : ''}
+    ${bubbles || '<div class="memo">还没有往来消息，在下面给 TA 发第一条吧。</div>'}
+    <form class="th-form" method="post" action="/dm/send">
+      <input type="hidden" name="to" value="${otherId}">
+      <input type="hidden" name="back" value="/messages/${otherId}">
+      ${capRow}
+      <textarea name="content" rows="3" maxlength="200" placeholder="写下你想说的话（最多 200 字）" required></textarea>
+      <div style="margin-top:8px"><button class="btn" type="submit">发送</button></div>
+    </form></div>
+    <div class="pager"><a href="/messages">← 全部私信</a></div>`;
+  const notifCount = ident.user ? await unreadNotifCount(env, ident.user.id) : 0;
+  return htmlResponse(layout(await withUsage(env, ident.settings), { title: `与 ${otherName} 的私信 · ${ident.settings.site_name}`, body, adminView: ident.adminReq, user: ident.user, notifCount }));
 }
 
 // 附件下载：经 /dl/<key> 下载时计数一次（直链 /media 不计数），并强制以附件形式下载
@@ -584,6 +707,9 @@ export default {
       }
       if (path === '/logout' && method === 'GET') return admin.userLogout(env, request);
       if (path === '/notifications' && method === 'GET') return notificationsPage(env, request);
+      if (path === '/dm/send' && method === 'POST') return dmSend(env, request);
+      if (path === '/messages' && method === 'GET') return messagesPage(env, request);
+      { const dmM = path.match(/^\/messages\/(\d+)$/); if (dmM && method === 'GET') return threadPage(env, request, Number(dmM[1])); }
       if (path === '/post/new') {
         return method === 'GET' ? admin.userPostPage(env, request, null) : admin.userPostSave(env, request, null);
       }

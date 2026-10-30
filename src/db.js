@@ -2,7 +2,7 @@
 import { sha256Hex, randomToken, nowSec } from './utils.js';
 
 // 版本号（2026-10-26 用户定）：三段式 2.中.尾——增减功能递增中段、尾段归零；修 bug 只递增尾段。
-export const VERSION = '2.14.0';
+export const VERSION = '2.15.0';
 
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS memos (
@@ -78,6 +78,18 @@ const CREATE_STATEMENTS = [
     last_geo TEXT NOT NULL DEFAULT '',
     last_ua TEXT NOT NULL DEFAULT ''
   )`,
+  `CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_id INTEGER NOT NULL,
+    from_name TEXT NOT NULL DEFAULT '',
+    to_id INTEGER NOT NULL,
+    to_name TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL,
+    is_read INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(to_id, is_read, id)`,
+  `CREATE INDEX IF NOT EXISTS idx_msg_from ON messages(from_id, created_at)`,
   `CREATE TABLE IF NOT EXISTS downloads (
     file_key TEXT PRIMARY KEY,
     cnt INTEGER NOT NULL DEFAULT 0,

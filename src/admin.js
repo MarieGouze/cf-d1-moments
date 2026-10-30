@@ -29,6 +29,17 @@ a{color:#576b95;text-decoration:none}
 .ok{background:#e9f7e9;border:1px solid #bfe3bf;color:#1c5c1c;border-radius:10px;padding:10px 14px;margin:12px 0;font-size:14px}
 table{width:100%;border-collapse:collapse;font-size:14px}
 td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+.u-ip{word-break:break-all;max-width:200px}
+.u-dev{max-width:220px}
+.u-cards{display:none}
+.u-card{border:1px solid #eee;border-radius:10px;padding:10px 12px;margin:10px 0}
+.u-card .u-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.u-card .u-acts{margin-left:auto;white-space:nowrap}
+.u-card .u-meta{font-size:12.5px;color:#555;line-height:1.8;margin-top:6px;word-break:break-all}
+@media (max-width:760px){
+  .u-table{display:none}
+  .u-cards{display:block}
+}
 @media (max-width:640px){
   .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
   table{width:max-content;min-width:100%}
@@ -971,26 +982,32 @@ function deviceOf(ua) {
 }
 
 export async function usersPage(env) {
-  const { results } = await env.DB.prepare('SELECT id, username, reg_ip, status, created_at, last_login_at, last_ip, last_geo, last_ua FROM users ORDER BY id DESC LIMIT 200').all();
+  const { results } = await env.DB.prepare('SELECT id, username, avatar, reg_ip, status, created_at, last_login_at, last_ip, last_geo, last_ua FROM users ORDER BY id DESC LIMIT 200').all();
   const fmt = (ts) => ts ? new Date((ts + 28800) * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—';
+  const actForms = (u) => `${u.status
+    ? `<form method="post" action="/admin/users/${u.id}/enable" style="display:inline"><button class="btn" style="padding:4px 10px">启用</button></form>`
+    : `<form method="post" action="/admin/users/${u.id}/disable" style="display:inline" onsubmit="return confirm('确定禁用用户「${esc(u.username)}」？他将立刻被退出登录且无法再登录（评论保留，可随时启用恢复）。')"><button class="btn ghost" style="padding:4px 10px">禁用</button></form>`}
+        <form method="post" action="/admin/users/${u.id}/delete" style="display:inline" onsubmit="return confirm('确定删除用户「${esc(u.username)}」？其登录会话会一并失效（已发出的评论会保留，名字不变）。')"><button class="btn ghost" style="padding:4px 10px">删除</button></form>`;
+  const head = (u) => `${u.avatar ? `<img src="${esc(u.avatar)}" alt="" style="width:26px;height:26px;border-radius:50%;vertical-align:middle;margin-right:6px">` : ''}<b>${esc(u.username)}</b> <span class="hint">#${u.id}</span>${u.status ? ' <span class="hint" style="color:#e5484d">（已禁用）</span>' : ''}`;
+  const dev = (u) => u.last_ua ? `<span title="${esc(u.last_ua)}">${esc(deviceOf(u.last_ua))} · ${esc(parseUa(u.last_ua))}</span>` : '—';
   const rows = (results || []).map((u) => `<tr>
-      <td>${u.avatar ? `<img src="${esc(u.avatar)}" alt="" style="width:26px;height:26px;border-radius:50%;vertical-align:middle;margin-right:6px">` : ''}<b>${esc(u.username)}</b> <span class="hint">#${u.id}</span>${u.status ? ' <span class="hint" style="color:#e5484d">（已禁用）</span>' : ''}<div class="hint">注册 IP ${esc(u.reg_ip || '—')}</div></td>
+      <td>${head(u)}<div class="hint">注册 IP ${esc(u.reg_ip || '—')}</div></td>
       <td style="white-space:nowrap">${fmt(u.created_at)}</td>
       <td style="white-space:nowrap">${fmt(u.last_login_at)}</td>
-      <td>${u.last_ua ? `<span title="${esc(u.last_ua)}">${esc(deviceOf(u.last_ua))} · ${esc(parseUa(u.last_ua))}</span>` : '—'}</td>
-      <td>${esc(u.last_ip || '—')}</td>
+      <td class="u-dev">${dev(u)}</td>
+      <td class="u-ip">${esc(u.last_ip || '—')}</td>
       <td>${esc(geoText(u.last_geo) || '—')}</td>
-      <td style="white-space:nowrap">
-        ${u.status
-          ? `<form method="post" action="/admin/users/${u.id}/enable" style="display:inline"><button class="btn" style="padding:4px 10px">启用</button></form>`
-          : `<form method="post" action="/admin/users/${u.id}/disable" style="display:inline" onsubmit="return confirm('确定禁用用户「${esc(u.username)}」？他将立刻被退出登录且无法再登录（评论保留，可随时启用恢复）。')"><button class="btn ghost" style="padding:4px 10px">禁用</button></form>`}
-        <form method="post" action="/admin/users/${u.id}/delete" style="display:inline" onsubmit="return confirm('确定删除用户「${esc(u.username)}」？其登录会话会一并失效（已发出的评论会保留，名字不变）。')"><button class="btn ghost" style="padding:4px 10px">删除</button></form>
-      </td>
+      <td style="white-space:nowrap">${actForms(u)}</td>
     </tr>`).join('');
+  // 手机端不用宽表格（列多必然挤出框）：改成一人一张小卡片，信息逐行摆、按钮在右上角
+  const cards = (results || []).map((u) => `<div class="u-card">
+      <div class="u-top">${head(u)}<span class="u-acts">${actForms(u)}</span></div>
+      <div class="u-meta">注册：${fmt(u.created_at)}（IP ${esc(u.reg_ip || '—')}）<br>最后登录：${fmt(u.last_login_at)}<br>设备：${dev(u)}<br>IP：${esc(u.last_ip || '—')}<br>地址：${esc(geoText(u.last_geo) || '—')}</div>
+    </div>`).join('');
   return page('后台 · 注册用户', `${nav()}
     <div class="card"><h2>👥 注册用户（共 ${(results || []).length} 人）</h2>
-    <p class="hint">「最后登录」一列记录的是该用户最近一次登录/注册时的设备、系统、IP 与大致地址（来自接入网络，可能不精确）。禁用后立即失效且不能登录，启用即恢复；删除只删账号与会话，不删除他发过的评论。开放/关闭注册在「站点设置」里。</p>
-    ${rows ? `<table><tr><th>用户</th><th>注册时间</th><th>最后登录</th><th>设备 · 系统</th><th>IP</th><th>地址</th><th></th></tr>${rows}</table>` : '<p class="hint">还没有注册用户。</p>'}
+    <p class="hint">「最后登录」记录的是该用户最近一次登录/注册时的设备、系统、IP 与大致地址（来自接入网络，可能不精确）。禁用后立即失效且不能登录，启用即恢复；删除只删账号与会话，不删除他发过的评论。开放/关闭注册在「站点设置」里。</p>
+    ${rows ? `<div class="u-table"><table><tr><th>用户</th><th>注册时间</th><th>最后登录</th><th>设备 · 系统</th><th>IP</th><th>地址</th><th></th></tr>${rows}</table></div><div class="u-cards">${cards}</div>` : '<p class="hint">还没有注册用户。</p>'}
     </div>`);
 }
 
@@ -1248,6 +1265,7 @@ export async function settingsPage(env, url) {
       <label style="display:block;margin:8px 0"><input type="checkbox" name="comments_enabled" value="1" style="width:auto" ${s.comments_enabled === '1' ? 'checked' : ''}> 开启评论</label>
       <label style="display:block;margin:8px 0"><input type="checkbox" name="registration_open" value="1" style="width:auto" ${s.registration_open === '1' ? 'checked' : ''}> 开放游客注册（注册后可用自己的用户名评论；已注册用户在「注册用户」页管理）</label>
       <label style="display:block;margin:8px 0"><input type="checkbox" name="users_can_post" value="1" style="width:auto" ${s.users_can_post === '1' ? 'checked' : ''}> 开放注册用户发动态（注册用户可发布、编辑、删除自己的动态；他们没有置顶/隐藏/门控/观看密码等管理员选项，动态会标注作者名；你仍可管理全部动态）</label>
+      <label style="display:block;margin:8px 0"><input type="checkbox" name="forum_mode" value="1" style="width:auto" ${s.forum_mode === '1' ? 'checked' : ''}> 论坛模式（首页与标签页把每条动态收拢成一行标题，点开展开完整内容，同时只能展开一条；详情页不变）</label>
       <label>评论是否审核</label>
       <select name="comments_moderation">
         <option value="1" ${s.comments_moderation !== '0' ? 'selected' : ''}>先审后显（评论要后台点通过才显示）</option>
@@ -1326,6 +1344,7 @@ export async function settingsSave(env, request) {
   await setSetting(env, 'comments_enabled', f.get('comments_enabled') ? '1' : '0');
   await setSetting(env, 'registration_open', f.get('registration_open') ? '1' : '0');
   await setSetting(env, 'users_can_post', f.get('users_can_post') ? '1' : '0');
+  await setSetting(env, 'forum_mode', f.get('forum_mode') ? '1' : '0');
   await setSetting(env, 'comments_moderation', f.get('comments_moderation') === '0' ? '0' : '1');
   await setSetting(env, 'spam_keywords', String(f.get('spam_keywords') || '').slice(0, 2000));
   await setSetting(env, 'links', JSON.stringify(links));
