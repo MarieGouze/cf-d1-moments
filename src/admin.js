@@ -457,8 +457,8 @@ function memoForm(memo, settings) {
         <option value="3" ${memo.pinned === 3 ? 'selected' : ''}>⭐⭐⭐ 三星置顶（最高）</option>
       </select></label>
     <label style="display:block;margin:8px 0"><input type="checkbox" name="hidden" value="1" style="width:auto" ${memo.hidden ? 'checked' : ''}> 隐藏（仅自己在登录状态下可见，游客看不到）</label>
-    <label style="display:block;margin:8px 0"><input type="checkbox" name="files_gated" value="1" style="width:auto" ${memo.files_gated ? 'checked' : ''}> 附件文件回复后可见（游客在这条动态下评论后，才能看到下载文件；图片、视频不受影响）</label>
-    <label style="display:block;margin:8px 0"><input type="checkbox" name="content_gated" value="1" style="width:auto" ${memo.content_gated ? 'checked' : ''}> 正文回复后可见（游客评论后才能看正文、图片和附件；标题照常显示，勾了这个就不必再勾上一项）</label>
+    <label style="display:block;margin:8px 0"><input type="checkbox" name="files_gated" value="1" style="width:auto" ${memo.files_gated ? 'checked' : ''}> 附件文件回复后可见（游客直接评论这条动态后，才能看到下载文件；回复动态下的留言不算；图片、视频不受影响）</label>
+    <label style="display:block;margin:8px 0"><input type="checkbox" name="content_gated" value="1" style="width:auto" ${memo.content_gated ? 'checked' : ''}> 正文回复后可见（游客直接评论本条后才能看正文、图片和附件；回复动态下的留言不算；标题照常显示，勾了这个就不必再勾上一项）</label>
     <label style="display:block;margin:8px 0"><input type="checkbox" name="comments_members_only" value="1" style="width:auto" ${memo.comments_members_only ? 'checked' : ''}> 仅注册用户可评论（游客在这条下只能看，登录/注册后才能评论）</label>
     <label style="display:block;margin:8px 0"><input type="checkbox" name="members_only" value="1" style="width:auto" ${memo.members_only ? 'checked' : ''}> 仅注册用户可见（游客看不到这条的正文和评论，只会看到登录/注册提示；比上一项更严格，勾了这个就不必再勾上一项）</label>
     <label>观看密码（可选${memo.view_password_hash ? '，已设置' : ''}；留空 = ${memo.view_password_hash ? '不修改' : '不设密码'}；设了后访客输对密码才能看这条的正文、图片、附件与评论，输对一次 30 天免输）</label>

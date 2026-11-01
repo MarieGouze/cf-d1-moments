@@ -135,7 +135,7 @@ async function withUsage(env, settings) {
   return out;
 }
 
-// 「附件回复后可见」的解锁集合：管理员全解锁；游客按评论 IP 判断（在该动态下留过言即解锁）
+// 「回复后可见」的解锁集合（附件门控与正文门控共用）：管理员全解锁；其余按评论 IP 判断——必须直接评论这条动态本身（parent_id=0）才解锁，回复动态下的某条留言不算（用户 2026-11-01 定）
 async function unlockedSet(env, request, memoIds, adminView) {
   const out = new Set();
   if (!memoIds.length) return out;
@@ -148,7 +148,7 @@ async function unlockedSet(env, request, memoIds, adminView) {
   try {
     const ph = memoIds.map(() => '?').join(',');
     const rows = await env.DB.prepare(
-      `SELECT DISTINCT memo_id FROM comments WHERE ip = ? AND flag = '' AND memo_id IN (${ph})`
+      `SELECT DISTINCT memo_id FROM comments WHERE ip = ? AND flag = '' AND parent_id = 0 AND memo_id IN (${ph})`
     ).bind(ip, ...memoIds).all();
     for (const r of rows.results || []) out.add(r.memo_id);
   } catch { /* 查询失败按未解锁处理 */ }
