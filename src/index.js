@@ -244,6 +244,18 @@ async function memoDetail(env, request, id) {
       unlockErr = `密码不对，请重试。${n ? `（已错 ${escapeXml(n)} 次，错满 5 次将暂停 10 分钟）` : ''}`;
     }
   }
+  // 浏览量：管理员不计、密码/仅会员动态在未解锁时不计；同一浏览器同一天对同一条只计一次（cookie 存日期）
+  let viewCookie = '';
+  if (!adminView && viewOk && !membersLocked) {
+    const today = new Date(Date.now() + 28800000).toISOString().slice(0, 10);
+    if (parseCookies(request)['mm_seen_' + id] !== today) {
+      try {
+        await env.DB.prepare('UPDATE memos SET views = views + 1 WHERE id = ?').bind(id).run();
+        memo.views = (memo.views || 0) + 1;
+        viewCookie = 'mm_seen_' + id + '=' + today + '; Path=/; Max-Age=86400; SameSite=Lax';
+      } catch { /* 计数失败不影响阅读 */ }
+    }
+  }
   const { avatars: userAvatars, ids: userIds } = await userMapsFor(env, comments);
   const dlCounts = await downloadCounts(env, [memo]);
   const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, user, userAvatars, userIds, filesUnlocked: unlocked.has(id), pwLocked: !viewOk, membersLocked, unlockErr, dlCounts })}</div>
@@ -251,7 +263,7 @@ async function memoDetail(env, request, id) {
   const pageTitle = memo.title || (viewOk && !membersLocked ? plainTextExcerpt(memo.content_md, 40) : '') || settings.site_name;
   const notifCount = user ? await unreadNotifCount(env, user.id) : 0;
   const adminNotifCount = adminView ? await unreadAdminCount(env) : 0;
-  return htmlResponse(layout(await withUsage(env, settings), { title: `${pageTitle} · ${settings.site_name}`, body, adminView, user, notifCount, adminNotifCount }));
+  return htmlResponse(layout(await withUsage(env, settings), { title: `${pageTitle} · ${settings.site_name}`, body, adminView, user, notifCount, adminNotifCount }), 200, viewCookie ? { 'Set-Cookie': viewCookie } : {});
 }
 
 async function likePost(env, request, id) {

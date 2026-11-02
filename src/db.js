@@ -2,7 +2,7 @@
 import { sha256Hex, randomToken, nowSec } from './utils.js';
 
 // 版本号（2026-10-26 用户定）：三段式 2.中.尾——增减功能递增中段、尾段归零；修 bug 只递增尾段。
-export const VERSION = '2.17.5';
+export const VERSION = '2.18.0';
 
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS memos (
@@ -16,6 +16,7 @@ const CREATE_STATEMENTS = [
     pinned INTEGER NOT NULL DEFAULT 0,
     files_gated INTEGER NOT NULL DEFAULT 0,
     content_gated INTEGER NOT NULL DEFAULT 0,
+    views INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   )`,
@@ -184,6 +185,10 @@ export async function initDb(env) {
   // 迁移：memos.content_gated（正文回复后可见：正文、媒体、附加内容整体门控，标题照常显示）
   if (!(cols.results || []).some((c) => c.name === 'content_gated')) {
     await env.DB.prepare('ALTER TABLE memos ADD COLUMN content_gated INTEGER NOT NULL DEFAULT 0').run();
+  }
+  // 迁移：memos.views（浏览量：详情页打开计数，同一浏览器同一天对同一条只计一次）
+  if (!(cols.results || []).some((c) => c.name === 'views')) {
+    await env.DB.prepare('ALTER TABLE memos ADD COLUMN views INTEGER NOT NULL DEFAULT 0').run();
   }
   // 迁移：memos.view_password_hash（单条动态观看密码的 sha256；空 = 无密码）
   if (!(cols.results || []).some((c) => c.name === 'view_password_hash')) {

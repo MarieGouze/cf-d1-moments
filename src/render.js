@@ -696,10 +696,11 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       ${isAdmin ? `<form method="post" action="/admin/memos/${memo.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条动态？评论和点赞会一并移入垃圾桶。')"><button class="act" type="submit" style="color:#e5484d">&#x1F5D1;&#xFE0E; 删除</button></form>` : ''}
       ${!isAdmin && user && settings.users_can_post === '1' && memo.author_id === user.id ? `<a class="act" href="/post/${memo.id}/edit" style="text-decoration:none">✏️ 编辑</a><form method="post" action="/post/${memo.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条动态？评论和点赞会一并移入垃圾桶。')"><button class="act" type="submit" style="color:#e5484d">&#x1F5D1;&#xFE0E; 删除</button></form>` : ''}
       <span class="spacer"></span>
-      ${locked ? '' : `<button class="act${liked ? ' liked' : ''}" onclick="likeMemo(${memo.id},this)">❤ <span class="lc">${memo.like_count || 0}</span></button>
+      ${locked ? '' : `<button class="act${liked ? ' liked' : ''}" title="点赞" onclick="likeMemo(${memo.id},this)">❤ <span class="lc">${memo.like_count || 0}</span></button>
       ${(detail || isAdmin)
-        ? `<button class="act" type="button" title="评论" onclick="toggleCmt(${memo.id})">💬 ${memo.comment_count || 0}</button>`
-        : `<button class="act" type="button" title="评论" onclick="toggleCmt(${memo.id})">💬 ${memo.comment_count || 0}</button>`}`}
+        ? `<button class="act" type="button" title="回复" onclick="toggleCmt(${memo.id})">💬 ${memo.comment_count || 0}</button>`
+        : `<button class="act" type="button" title="回复" onclick="toggleCmt(${memo.id})">💬 ${memo.comment_count || 0}</button>`}
+      <span class="act" title="浏览量" style="cursor:default">👁️ ${memo.views || 0}</span>`}
     </div>
     <div id="comments">${cmtHtml}${cmtForm}</div>
   </article>`;
@@ -709,7 +710,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
   const plainFirst = firstLine.replace(/[#>*`\-\\[\]()!|]/g, '').trim();
   const barTitle = memo.title || plainFirst.slice(0, 60) || (media.length ? '📎 图文动态' : '（无标题）');
   const barAuthor = isUserPost ? (memo.author_name || '') : (settings.nickname || '');
-  return `<div class="fr-item"><button type="button" class="fr-bar" onclick="toggleForum(this)"><span class="fr-t">${memo.pinned ? `<span class="fr-pin">${'⭐'.repeat(memo.pinned)}</span>` : ''}${esc(barTitle)}</span><span class="fr-meta">${esc(barAuthor)} · ${timeAgo(memo.created_at)} · ❤ ${memo.like_count || 0} · 💬 ${memo.comment_count || 0}</span><span class="fr-arrow">▾</span></button><div class="fr-body" hidden>${cardHtml}</div></div>`;
+  return `<div class="fr-item"><button type="button" class="fr-bar" onclick="toggleForum(this)"><span class="fr-t">${memo.pinned ? `<span class="fr-pin">${'⭐'.repeat(memo.pinned)}</span>` : ''}${esc(barTitle)}</span><span class="fr-meta">${esc(barAuthor)} · ${timeAgo(memo.created_at)} · ❤ ${memo.like_count || 0} · 💬 ${memo.comment_count || 0} · 👁️ ${memo.views || 0}</span><span class="fr-arrow">▾</span></button><div class="fr-body" hidden>${cardHtml}</div></div>`;
 }
 
 export function layout(settings, { title, body, activeTag = '', adminView = false, user = null, notifCount = 0, adminNotifCount = 0 }) {
