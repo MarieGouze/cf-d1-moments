@@ -21,7 +21,7 @@ async function listMemos(env, { page = 1, tag = '', adminView = false } = {}) {
   const { results } = await env.DB.prepare(
     `SELECT m.*, u.avatar AS author_avatar,
       (SELECT COUNT(*) FROM likes WHERE memo_id = m.id) AS like_count,
-      (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND status='approved' AND flag='') AS comment_count
+      (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND ((status='approved' AND flag='') OR flag='spam')) AS comment_count
      FROM memos m LEFT JOIN users u ON u.id = m.author_id ${where}
      ORDER BY m.pinned DESC, m.created_at DESC
      LIMIT ? OFFSET ?`
@@ -33,7 +33,7 @@ async function listMemos(env, { page = 1, tag = '', adminView = false } = {}) {
 
 async function approvedComments(env, memoId, limit = 500, adminView = false) {
   const { results } = await env.DB.prepare(
-    `SELECT id, parent_id, reply_to, name, content, created_at, admin_only FROM comments WHERE memo_id = ? AND status='approved' AND flag='' ORDER BY created_at ASC LIMIT ?`
+    `SELECT id, parent_id, reply_to, name, content, created_at, admin_only, flag FROM comments WHERE memo_id = ? AND (flag = 'spam' OR (status='approved' AND flag='')) ORDER BY created_at ASC LIMIT ?`
   ).bind(memoId, limit).all();
   return results || [];
 }
@@ -135,7 +135,7 @@ async function withUsage(env, settings) {
   return out;
 }
 
-// 「回复后可见」的解锁集合（附件门控与正文门控共用）：管理员全解锁；其余按评论 IP 判断——必须直接评论这条动态本身（parent_id=0）才解锁，回复动态下的某条留言不算（用户 2026-11-01 定）
+// 「回复后可见」的解锁集合（附件门控与正文门控共用）：管理员全解锁；其余按评论 IP 判断——必须直接评论这条动态本身（parent_id=0）才解锁，回复动态下的某条留言不算（用户 2026-11-01 定）；且评论须已通过审核（status='approved'）——开评论审核时，待审评论不解锁（用户 2026-11-03 定）
 async function unlockedSet(env, request, memoIds, adminView) {
   const out = new Set();
   if (!memoIds.length) return out;
@@ -148,7 +148,7 @@ async function unlockedSet(env, request, memoIds, adminView) {
   try {
     const ph = memoIds.map(() => '?').join(',');
     const rows = await env.DB.prepare(
-      `SELECT DISTINCT memo_id FROM comments WHERE ip = ? AND flag = '' AND parent_id = 0 AND memo_id IN (${ph})`
+      `SELECT DISTINCT memo_id FROM comments WHERE ip = ? AND flag = '' AND status = 'approved' AND parent_id = 0 AND memo_id IN (${ph})`
     ).bind(ip, ...memoIds).all();
     for (const r of rows.results || []) out.add(r.memo_id);
   } catch { /* 查询失败按未解锁处理 */ }
@@ -223,7 +223,7 @@ async function memoDetail(env, request, id) {
   const memo = await env.DB.prepare(
     `SELECT m.*, u.avatar AS author_avatar,
       (SELECT COUNT(*) FROM likes WHERE memo_id = m.id) AS like_count,
-      (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND status='approved' AND flag='') AS comment_count
+      (SELECT COUNT(*) FROM comments WHERE memo_id = m.id AND ((status='approved' AND flag='') OR flag='spam')) AS comment_count
      FROM memos m LEFT JOIN users u ON u.id = m.author_id WHERE m.id = ?`
   ).bind(id).first();
   if (!memo || (!adminView && (memo.created_at > nowSec() || memo.hidden))) {
@@ -292,6 +292,20 @@ async function likePost(env, request, id) {
   return Response.json({ likes: row ? row.c : 0, liked });
 }
 
+// 无意义评论判定（站长除外，命中直接拦下不入库）：
+// ① 去掉空白/标点/符号后什么都不剩（纯标点）② 同一英文字母连打 ③ 纯字母、无元音、长度≥3 的键盘乱打（如 hxhxhhxh）
+// 含中文或数字的一律放行（顶、好、666、u1s1 都是正常短评）；常见拼音梗（yyds 等）有豁免名单
+function isMeaninglessComment(text) {
+  const core = String(text || '').replace(/[\s\p{P}\p{S}]/gu, '');
+  if (!core) return true;
+  if (/[\u4e00-\u9fff0-9]/.test(core)) return false;
+  const low = core.toLowerCase();
+  if (!/[a-z]/.test(low)) return false;
+  if (/^([a-z])\1{2,}$/.test(low)) return true;
+  if (['yyds', 'xswl', 'dbq', 'tql', 'srds', 'awsl', 'jrm', 'zqsg'].includes(low)) return false;
+  return low.length >= 3 && !/[aeiou]/.test(low);
+}
+
 async function commentPost(env, request, id) {
   const settings = await getSettings(env);
   const back = `/memo/${id}`;
@@ -317,6 +331,8 @@ async function commentPost(env, request, id) {
   // 字数上限：注册用户与站长 80 字，游客 50 字
   const content = String(form.get('content') || '').trim().slice(0, user || adminReq ? 80 : 50);
   if (!content) return redirect(`${back}?c=empty`);
+  // 无意义评论直接拦下（站长不拦），不入库、不进垃圾箱
+  if (!adminReq && isMeaninglessComment(content)) return redirect(`${back}?c=invalid`);
   // 回复：以被点的那条评论（reply_target）为准取昵称（库中为准、防伪造），parent 仍挂到它所属的顶层评论下；
   // 老表单没有 reply_target 时退回 parent_id（@ 的就是顶层作者）
   let parentId = 0;

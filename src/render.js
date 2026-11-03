@@ -141,6 +141,12 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .ao-check{display:flex;align-items:center;gap:4px;font-size:13px;color:var(--sub);margin-left:12px;cursor:pointer;white-space:nowrap}
 .cmt-form .ao-check input{width:auto;padding:0;margin:0}
 .ao-tag{font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:0 5px;margin-left:6px;white-space:nowrap}
+.cmt-badge{display:inline-block;font-size:10px;line-height:1.5;padding:0 5px;border-radius:6px;margin-left:4px;vertical-align:1px;font-weight:600;color:#fff;white-space:nowrap}
+.cmt-badge.boss{background:#f0a500}
+.cmt-badge.author{background:#576b95}
+.at-boss{color:#d98e00;font-weight:700}
+.at-author{color:var(--accent);font-weight:700}
+.invalid-cmt{color:var(--sub);font-style:italic}
 .ao-hidden{color:#d97706;font-weight:600}
 .bell{position:relative;font-size:15px}
 .nbadge{position:absolute;top:-2px;right:-6px;background:#e5484d;color:#fff;font-size:10px;font-weight:700;line-height:1;padding:2px 5px;border-radius:999px;min-width:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.35)}
@@ -576,6 +582,14 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     const uid = c.name === settings.nickname ? 0 : (userIds[c.name] !== undefined ? userIds[c.name] : null);
     return dmLink(c.name, uid) || `<span class="n">${esc(c.name)}</span>`;
   };
+  // 评论区身份标记：站长（昵称与站长相同）挂金色「站长」，动态作者挂蓝色「作者」，一眼可辨；被 @ 的名字同步着色
+  const authorName = isUserPost ? (memo.author_name || '') : (settings.nickname || '');
+  const cmtBadge = (c) => {
+    if (c.name === settings.nickname) return '<span class="cmt-badge boss">站长</span>';
+    if (authorName && c.name === authorName) return '<span class="cmt-badge author">作者</span>';
+    return '';
+  };
+  const atCls = (name) => (name === settings.nickname ? ' at-boss' : (authorName && name === authorName ? ' at-author' : ''));
   // 列表页：默认显示前 2 条评论（无框、纯文字行），超过 2 条时追加「共 XX 条评论，点击查看全部」
   // 详情页：显示全部评论（带回复层级）
   let cmtHtml = '';
@@ -602,9 +616,11 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     const total = memo.comment_count || comments.length;
     if (comments.length || total > 0) {
       const line = (c) =>
-        c.admin_only && !isAdmin
-          ? `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}：<span class="ao-hidden">🔒 隐藏评论</span></div>`
-          : `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${isAdmin
+        c.flag === 'spam' && !isAdmin
+          ? `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="invalid-cmt">无效评论待修改</span></div>`
+          : c.admin_only && !isAdmin
+          ? `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="ao-hidden">🔒 隐藏评论</span></div>`
+          : `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}${c.reply_to ? ` <span class="at${atCls(c.reply_to)}">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${c.flag === 'spam' && isAdmin ? '<span class="ao-tag">垃圾评论</span>' : ''}${isAdmin
           ? `<button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${c.parent_id || c.id},${c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>`
           : `<a class="reply-btn" href="/memo/${memo.id}?reply=${c.parent_id || c.id}&rtarget=${c.id}&rname=${encodeURIComponent(c.name)}#comments" title="回复" aria-label="回复"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></a>`}${delCmtBtn(c)}</div>`;
       const first = comments.slice(0, 2).map(line).join('');
@@ -625,9 +641,11 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       }
     }
     const row = (c, rootId) =>
-      c.admin_only && !isAdmin
-        ? `<div class="cmt">${cmtAvatar(c)}${cmtName(c)}：<span class="ao-hidden">🔒 隐藏评论</span><span class="when">${timeAgo(c.created_at)}</span></div>`
-        : `<div class="cmt">${cmtAvatar(c)}${cmtName(c)}${c.reply_to ? ` <span class="at">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId},${c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}</div>`;
+      c.flag === 'spam' && !isAdmin
+        ? `<div class="cmt">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="invalid-cmt">无效评论待修改</span><span class="when">${timeAgo(c.created_at)}</span></div>`
+        : c.admin_only && !isAdmin
+        ? `<div class="cmt">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="ao-hidden">🔒 隐藏评论</span><span class="when">${timeAgo(c.created_at)}</span></div>`
+        : `<div class="cmt">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}${c.reply_to ? ` <span class="at${atCls(c.reply_to)}">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${c.flag === 'spam' && isAdmin ? '<span class="ao-tag">垃圾评论</span>' : ''}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId},${c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}</div>`;
     cmtHtml = `<div class="cmt-box">${roots
       .map((r) => row(r, r.id) + (byParent.get(r.id) || []).map((c) => `<div class="replies">${row(c, r.id)}</div>`).join(''))
       .join('')}</div>`;
@@ -792,6 +810,7 @@ export function pagerHtml(page, hasMore, base) {
 export function noticeHtml(code) {
   const map = {
     commented: '评论已发表，谢谢！',
+    invalid: '评论内容太简略或无意义，换个说法再发吧',
     commented_mod: '评论已提交，审核通过后就会显示，谢谢！',
     captcha: '验证码不对，请重新填写。',
     closed: '评论功能已关闭。',
