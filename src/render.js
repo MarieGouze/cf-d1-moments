@@ -22,7 +22,7 @@ body{background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fw
 a{color:var(--accent);text-decoration:none}
 .wrap{max-width:720px;margin:0 auto;padding:0 12px 40px}
 .head-box{position:relative;background:var(--card);border-radius:16px 16px 0 0;box-shadow:var(--shadow);padding:0;margin-top:12px}
-.cover{position:absolute;inset:0;background:#3a3f4a center/cover no-repeat;border-radius:16px 16px 0 0;z-index:0}
+.cover{position:absolute;inset:0;background:#3a3f4a center/cover no-repeat;background-size:cover;border-radius:16px 16px 0 0;z-index:0}
 .cover::after{content:'';position:absolute;inset:0;border-radius:inherit;background:linear-gradient(to bottom, rgba(10,12,20,0) 50%, rgba(10,12,20,.45) 100%)}
 .head-inner{position:relative;z-index:1;padding:0 16px 20px}
 .hero{position:relative;height:238px}
@@ -95,6 +95,7 @@ a{color:var(--accent);text-decoration:none}
 .lightbox img{max-width:94vw;max-height:92vh;object-fit:contain;border-radius:4px}
 .grid.g2,.grid.g4{grid-template-columns:repeat(2,1fr);max-width:340px}
 .grid.g3,.grid.g5,.grid.g6,.grid.g7,.grid.g8,.grid.g9{grid-template-columns:repeat(3,1fr)}
+@media (max-width:640px){.grid{max-width:300px}.grid.g1{max-width:270px}.grid.g2,.grid.g4{max-width:250px}}
 .ext{margin:8px 0 4px;border:1px solid var(--line);border-radius:10px;overflow:hidden;max-width:460px}
 .ext iframe{width:100%;aspect-ratio:16/9;border:0;display:block}
 .ext-vertical{max-width:460px;width:fit-content}
@@ -751,7 +752,7 @@ export function layout(settings, { title, body, activeTag = '', adminView = fals
 <meta name="description" content="${esc(settings.signature || '')}">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="alternate" type="application/rss+xml" title="${esc(settings.site_name)}" href="/feed.xml">
-<style>${CSS}</style>
+<style>${CSS}</style>${settings.cover_mode === 'bing' ? '<style>@media (max-width:640px){.cover{background-image:url(/cover/bing/m) !important}}</style>' : ''}
 <script>try{var t=localStorage.getItem('mm_theme');if(t)document.documentElement.setAttribute('data-theme',t);else if(matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.setAttribute('data-theme','dark')}catch(e){}</script>
 </head>
 <body>

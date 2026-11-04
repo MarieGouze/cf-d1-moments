@@ -686,16 +686,16 @@ async function feed(env) {
   return new Response(xml, { headers: { 'Content-Type': 'application/rss+xml; charset=utf-8' } });
 }
 
-async function coverBing(env, ctx, request, settings) {
+async function coverBing(env, ctx, request, settings, mobile = false) {
   const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
-  const cacheKey = new Request(new URL('/cover/bing/' + today, request.url));
+  const cacheKey = new Request(new URL('/cover/bing/' + (mobile ? 'm/' : '') + today, request.url));
   const cache = caches.default;
   try {
     const hit = await cache.match(cacheKey);
     if (hit) return hit;
   } catch { /* 缓存不可用就现取 */ }
   try {
-    const resp = await fetch('https://bing.ee123.net/img/', { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const resp = await fetch(mobile ? 'https://bing.ee123.net/img/?size=720x1280' : 'https://bing.ee123.net/img/', { headers: { 'User-Agent': 'Mozilla/5.0' } });
     const ct = resp.headers.get('Content-Type') || '';
     if (resp.ok && ct.includes('image')) {
       const buf = await resp.arrayBuffer();
@@ -778,6 +778,7 @@ export default {
       }
       if (path === '/feed.xml' && method === 'GET') return feed(env);
       if (path === '/cover/bing' && method === 'GET') return coverBing(env, ctx, request, await getSettings(env));
+      if (path === '/cover/bing/m' && method === 'GET') return coverBing(env, ctx, request, await getSettings(env), true);
 
       // ---------- 后台 ----------
       if (path === '/admin/setup') {
