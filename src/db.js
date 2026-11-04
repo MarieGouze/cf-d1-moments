@@ -2,7 +2,7 @@
 import { sha256Hex, randomToken, nowSec } from './utils.js';
 
 // 版本号（2026-10-26 用户定）：三段式 2.中.尾——增减功能递增中段、尾段归零；修 bug 只递增尾段。
-export const VERSION = '2.19.2';
+export const VERSION = '2.20.0';
 
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS memos (
@@ -119,6 +119,7 @@ export const DEFAULT_SETTINGS = {
   nickname: '主人',
   avatar_url: '',
   cover_url: '',
+  cover_mode: 'manual',
   signature: '记录生活，留住瞬间。',
   comments_enabled: '1',
   comments_moderation: '1',

@@ -1460,6 +1460,11 @@ export async function settingsPage(env, url) {
       <label>封面图片（页眉大图，上传后自动保存替换，也可以直接填地址）</label>
       ${s.cover_url ? `<img class="upl-prev wide" src="${esc(s.cover_url)}" alt="">` : ''}
       <div class="upl-row"><input name="cover_url" value="${esc(s.cover_url)}" placeholder="/media/… 或 https://…"><label class="btn upl-btn">上传替换<input type="file" accept="image/*" data-for="cover_url" hidden></label></div>
+      <label>封面来源（二选一）</label>
+      <select name="cover_mode">
+        <option value="manual" ${s.cover_mode !== 'bing' ? 'selected' : ''}>自己上传（用上面这张封面图）</option>
+        <option value="bing" ${s.cover_mode === 'bing' ? 'selected' : ''}>跟随 Bing 每日壁纸（每天自动换，选了它上面的封面图就不生效）</option>
+      </select>
       <label style="display:block;margin:8px 0"><input type="checkbox" name="comments_enabled" value="1" style="width:auto" ${s.comments_enabled === '1' ? 'checked' : ''}> 开启评论</label>
       <label style="display:block;margin:8px 0"><input type="checkbox" name="registration_open" value="1" style="width:auto" ${s.registration_open === '1' ? 'checked' : ''}> 开放游客注册（注册后可用自己的用户名评论；已注册用户在「注册用户」页管理）</label>
       <label style="display:block;margin:8px 0"><input type="checkbox" name="users_can_post" value="1" style="width:auto" ${s.users_can_post === '1' ? 'checked' : ''}> 开放注册用户发动态（注册用户可发布、编辑、删除自己的动态；他们没有置顶/隐藏/门控/观看密码等管理员选项，动态会标注作者名；你仍可管理全部动态）</label>
@@ -1539,6 +1544,7 @@ export async function settingsSave(env, request) {
   await setSetting(env, 'announce_text', String(f.get('announce_text') || '').trim().slice(0, 200));
   await setSetting(env, 'avatar_url', f.get('avatar_url'));
   await setSetting(env, 'cover_url', f.get('cover_url'));
+  await setSetting(env, 'cover_mode', f.get('cover_mode') === 'bing' ? 'bing' : 'manual');
   await setSetting(env, 'comments_enabled', f.get('comments_enabled') ? '1' : '0');
   await setSetting(env, 'registration_open', f.get('registration_open') ? '1' : '0');
   await setSetting(env, 'users_can_post', f.get('users_can_post') ? '1' : '0');
