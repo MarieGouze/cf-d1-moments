@@ -1374,7 +1374,7 @@ function geoText(geo) {
 }
 
 export async function commentsPage(env, url) {
-  const filter = url.searchParams.get('f') || 'pending';
+  const filter = url.searchParams.get('f') || 'spam';
   const where = filter === 'all' ? '' : filter === 'spam' ? "WHERE c.flag='spam'" : `WHERE c.status='${filter === 'approved' ? 'approved' : 'pending'}' AND c.flag=''`;
   const { results } = await env.DB.prepare(
     `SELECT c.*, m.content_md FROM comments c LEFT JOIN memos m ON m.id = c.memo_id ${where} ORDER BY c.created_at DESC LIMIT 100`
@@ -1394,7 +1394,7 @@ export async function commentsPage(env, url) {
   const tab = (k, label) => `<a href="/admin/comments?f=${k}" style="${filter === k ? 'font-weight:700' : ''}">${label}</a>`;
   return page('后台 · 评论审核', `${nav()}
     <div class="card"><h2>评论审核</h2>
-    <p>${tab('pending', '待审核')} · ${tab('approved', '已通过')} · ${tab('spam', '垃圾留言')} · ${tab('all', '全部')}</p>
+    <p>${tab('spam', '垃圾留言')} · ${tab('approved', '已通过')} · ${tab('pending', '待审核')} · ${tab('all', '全部')}</p>
     <table>${rows || '<tr><td>没有符合条件的评论。</td></tr>'}</table></div>`);
 }
 
