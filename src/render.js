@@ -74,6 +74,7 @@ a{color:var(--accent);text-decoration:none}
 .m-nick{color:var(--accent);font-weight:600;font-size:15px}
 .m-body{margin-left:52px}
 .m-title{font-size:17px;font-weight:700;line-height:1.4;margin:0 0 6px;color:var(--text)}
+.m-title-link{display:block;text-decoration:none;color:inherit}
 .m-content{font-size:15px;line-height:1.65;word-break:break-word}
 .m-content p{margin:6px 0}
 .m-content img{max-width:100%;border-radius:8px}
@@ -692,7 +693,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       </div>
     </div>
     <div class="m-body">
-      ${memo.title ? `<div class="m-title">${esc(memo.title)}</div>` : ''}
+      ${memo.title ? (detail ? `<div class="m-title">${esc(memo.title)}</div>` : `<a class="m-title-link" href="/memo/${memo.id}"><div class="m-title">${esc(memo.title)}</div></a>`) : ''}
       ${membersLocked
         ? `<div class="files-gated">🔒 本动态仅注册用户可见，<a href="/login?next=/memo/${memo.id}">登录</a>${settings.registration_open === '1' ? ` 或 <a href="/register?next=/memo/${memo.id}">注册</a>` : ''}后即可查看</div>`
         : pwLocked
