@@ -686,6 +686,28 @@ async function feed(env) {
   return new Response(xml, { headers: { 'Content-Type': 'application/rss+xml; charset=utf-8' } });
 }
 
+async function coverBing(env, ctx, request, settings) {
+  const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  const cacheKey = new Request(new URL('/cover/bing/' + today, request.url));
+  const cache = caches.default;
+  try {
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit;
+  } catch { /* 缓存不可用就现取 */ }
+  try {
+    const resp = await fetch('https://bing.ee123.net/img/', { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const ct = resp.headers.get('Content-Type') || '';
+    if (resp.ok && ct.includes('image')) {
+      const buf = await resp.arrayBuffer();
+      const out = new Response(buf, { headers: { 'Content-Type': ct, 'Cache-Control': 'public, max-age=21600' } });
+      try { ctx.waitUntil(cache.put(cacheKey, out.clone())); } catch { /* 存不进缓存不影响出图 */ }
+      return out;
+    }
+  } catch { /* 第三方接口拿不到就走兜底 */ }
+  if (settings.cover_url) return new Response(null, { status: 302, headers: { Location: settings.cover_url } });
+  return new Response('no cover', { status: 404 });
+}
+
 async function mediaGet(env, ctx, request, key) {
   // 边缘缓存：命中时不再回源 R2。site/ 品牌资源长期存；uploads/ 边缘只存 1 天（彻底删除动态时边缘副本最多残留 1 天，浏览器侧仍是 immutable 长缓存）；视频不进缓存（分段播放）
   const cache = caches.default;
@@ -755,6 +777,7 @@ export default {
         return dlGet(env, decodeURIComponent(path.slice('/dl/'.length)));
       }
       if (path === '/feed.xml' && method === 'GET') return feed(env);
+      if (path === '/cover/bing' && method === 'GET') return coverBing(env, ctx, request, await getSettings(env));
 
       // ---------- 后台 ----------
       if (path === '/admin/setup') {

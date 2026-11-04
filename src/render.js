@@ -733,7 +733,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
 }
 
 export function layout(settings, { title, body, activeTag = '', adminView = false, user = null, notifCount = 0, adminNotifCount = 0 }) {
-  const coverSrc = settings.cover_mode === 'bing' ? 'https://bing.ee123.net/img/' : settings.cover_url;
+  const coverSrc = settings.cover_mode === 'bing' ? '/cover/bing' : settings.cover_url;
   const coverStyle = coverSrc
     ? `style="background-image:url('${esc(coverSrc)}')"`
     : '';
