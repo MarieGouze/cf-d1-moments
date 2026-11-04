@@ -752,7 +752,7 @@ export function layout(settings, { title, body, activeTag = '', adminView = fals
 <meta name="description" content="${esc(settings.signature || '')}">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="alternate" type="application/rss+xml" title="${esc(settings.site_name)}" href="/feed.xml">
-<style>${CSS}</style>${settings.cover_mode === 'bing' ? '<style>@media (max-width:640px){.cover{background-image:url(/cover/bing/m) !important}}</style>' : ''}
+${settings.cover_mode === 'bing' ? '<link rel="preload" as="image" href="/cover/bing" media="(min-width:641px)" fetchpriority="high"><link rel="preload" as="image" href="/cover/bing/m" media="(max-width:640px)" fetchpriority="high">' : ''}<style>${CSS}</style>${settings.cover_mode === 'bing' ? '<style>@media (max-width:640px){.cover{background-image:url(/cover/bing/m) !important}}</style>' : ''}
 <script>try{var t=localStorage.getItem('mm_theme');if(t)document.documentElement.setAttribute('data-theme',t);else if(matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.setAttribute('data-theme','dark')}catch(e){}</script>
 </head>
 <body>

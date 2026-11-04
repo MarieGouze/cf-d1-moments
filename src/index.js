@@ -699,7 +699,7 @@ async function coverBing(env, ctx, request, settings, mobile = false) {
     const ct = resp.headers.get('Content-Type') || '';
     if (resp.ok && ct.includes('image')) {
       const buf = await resp.arrayBuffer();
-      const out = new Response(buf, { headers: { 'Content-Type': ct, 'Cache-Control': 'public, max-age=21600' } });
+      const out = new Response(buf, { headers: { 'Content-Type': ct, 'Cache-Control': 'public, max-age=43200' } });
       try { ctx.waitUntil(cache.put(cacheKey, out.clone())); } catch { /* 存不进缓存不影响出图 */ }
       return out;
     }
