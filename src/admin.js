@@ -31,7 +31,7 @@ a{color:#576b95;text-decoration:none}
 table{width:100%;border-collapse:collapse;font-size:14px}
 td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
 .u-ip{word-break:break-all;min-width:150px;max-width:220px}
-.u-dev{max-width:220px}
+.u-dev{min-width:130px;max-width:220px}
 .u-table{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .u-cards{display:none}
 .u-card{border:1px solid #eee;border-radius:10px;padding:10px 12px;margin:10px 0}
@@ -1095,8 +1095,8 @@ export async function userRegisterPost(env, request) {
   const cf = request.cf || {};
   const geo = JSON.stringify({ country: cf.country || '', region: cf.region || '', city: cf.city || '' });
   const ua = (request.headers.get('User-Agent') || '').slice(0, 300);
-  const ins = await env.DB.prepare('INSERT INTO users (username, password_hash, reg_ip, created_at, last_login_at, last_ip, last_geo, last_ua, avatar) VALUES (?,?,?,?,?,?,?,?,?)')
-    .bind(username, await userHash(username, pw), ip, now, now, ip, geo, ua, randomAvatar()).run();
+  const ins = await env.DB.prepare('INSERT INTO users (username, password_hash, reg_ip, created_at, last_login_at, login_count, last_ip, last_geo, last_ua, avatar) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .bind(username, await userHash(username, pw), ip, now, now, 1, ip, geo, ua, randomAvatar()).run();
   const token = await createUserSession(env, ins.meta.last_row_id);
   return redirect(next, { 'Set-Cookie': userCookie(token) });
 }
@@ -1140,7 +1140,7 @@ export async function userLoginPost(env, request) {
   const cf = request.cf || {};
   const geo = JSON.stringify({ country: cf.country || '', region: cf.region || '', city: cf.city || '' });
   const ua = (request.headers.get('User-Agent') || '').slice(0, 300);
-  await env.DB.prepare('UPDATE users SET last_login_at = ?, last_ip = ?, last_geo = ?, last_ua = ? WHERE id = ?')
+  await env.DB.prepare('UPDATE users SET last_login_at = ?, login_count = login_count + 1, last_ip = ?, last_geo = ?, last_ua = ? WHERE id = ?')
     .bind(now, ip, geo, ua, u.id).run();
   // 老用户（头像功能上线前注册的）首次登录时补绑一个随机头像
   if (!u.avatar) {
@@ -1165,8 +1165,12 @@ function deviceOf(ua) {
   return '电脑';
 }
 
-export async function usersPage(env) {
-  const { results } = await env.DB.prepare('SELECT id, username, avatar, reg_ip, status, created_at, last_login_at, last_ip, last_geo, last_ua FROM users ORDER BY id DESC LIMIT 200').all();
+export async function usersPage(env, url) {
+  const totalRow = await env.DB.prepare('SELECT COUNT(*) AS c FROM users').first();
+  const total = totalRow ? totalRow.c : 0;
+  const pages = Math.max(1, Math.ceil(total / 20));
+  const p = Math.min(pages, Math.max(1, parseInt((url && url.searchParams.get('p')) || '1', 10) || 1));
+  const { results } = await env.DB.prepare('SELECT id, username, avatar, reg_ip, status, created_at, last_login_at, login_count, last_ip, last_geo, last_ua FROM users ORDER BY id DESC LIMIT 20 OFFSET ?').bind((p - 1) * 20).all();
   const fmt = (ts) => ts ? new Date((ts + 28800) * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—';
   const actForms = (u) => `${u.status
     ? `<form method="post" action="/admin/users/${u.id}/enable" style="display:inline"><button class="btn" style="padding:4px 10px">启用</button></form>`
@@ -1177,7 +1181,7 @@ export async function usersPage(env) {
   const rows = (results || []).map((u) => `<tr>
       <td>${head(u)}<div class="hint">注册 IP ${esc(u.reg_ip || '—')}</div></td>
       <td style="white-space:nowrap">${fmt(u.created_at)}</td>
-      <td style="white-space:nowrap">${fmt(u.last_login_at)}</td>
+      <td style="white-space:nowrap">${fmt(u.last_login_at)}<div class="hint">共登录 ${u.login_count || 0} 次</div></td>
       <td class="u-dev">${dev(u)}</td>
       <td class="u-ip">${esc(u.last_ip || '—')}</td>
       <td>${esc(geoText(u.last_geo) || '—')}</td>
@@ -1186,12 +1190,13 @@ export async function usersPage(env) {
   // 手机端不用宽表格（列多必然挤出框）：改成一人一张小卡片，信息逐行摆、按钮在右上角
   const cards = (results || []).map((u) => `<div class="u-card">
       <div class="u-top">${head(u)}<span class="u-acts">${actForms(u)}</span></div>
-      <div class="u-meta">注册：${fmt(u.created_at)}（IP ${esc(u.reg_ip || '—')}）<br>最后登录：${fmt(u.last_login_at)}<br>设备：${dev(u)}<br>IP：${esc(u.last_ip || '—')}<br>地址：${esc(geoText(u.last_geo) || '—')}</div>
+      <div class="u-meta">注册：${fmt(u.created_at)}（IP ${esc(u.reg_ip || '—')}）<br>最后登录：${fmt(u.last_login_at)}（共登录 ${u.login_count || 0} 次）<br>设备：${dev(u)}<br>IP：${esc(u.last_ip || '—')}<br>地址：${esc(geoText(u.last_geo) || '—')}</div>
     </div>`).join('');
   return page('后台 · 注册用户', `${nav()}
-    <div class="card"><h2>👥 注册用户（共 ${(results || []).length} 人）</h2>
+    <div class="card"><h2>👥 注册用户（共 ${total} 人）</h2>
     <p class="hint">「最后登录」记录的是该用户最近一次登录/注册时的设备、系统、IP 与大致地址（来自接入网络，可能不精确）。禁用后立即失效且不能登录，启用即恢复；删除只删账号与会话，不删除他发过的评论。开放/关闭注册在「站点设置」里。</p>
     ${rows ? `<div class="u-table"><table><tr><th>用户</th><th>注册时间</th><th>最后登录</th><th>设备 · 系统</th><th>IP</th><th>地址</th><th></th></tr>${rows}</table></div><div class="u-cards">${cards}</div>` : '<p class="hint">还没有注册用户。</p>'}
+    ${pages > 1 ? `<p style="text-align:center;margin:14px 0 2px">${p > 1 ? `<a href="/admin/users?p=${p - 1}">← 上一页</a>` : '<span class="hint">← 上一页</span>'} <span class="hint">第 ${p} / ${pages} 页</span> ${p < pages ? `<a href="/admin/users?p=${p + 1}">下一页 →</a>` : '<span class="hint">下一页 →</span>'}</p>` : ''}
     </div>`);
 }
 
@@ -1396,12 +1401,28 @@ export function parseUa(ua) {
   return `${browser} · ${os}`;
 }
 
-// 评论里存的地理 JSON（Cloudflare 边缘给的国家/省/市）转可读文字
+// 地理位置中文化：Cloudflare 只给英文国家代码与省市英文名，能对上中文的优先显示中文
+const GEO_COUNTRY = { CN: '中国', HK: '中国香港', TW: '中国台湾', MO: '中国澳门', US: '美国', JP: '日本', KR: '韩国', SG: '新加坡', GB: '英国', FR: '法国', DE: '德国', CA: '加拿大', AU: '澳大利亚', NZ: '新西兰', RU: '俄罗斯', IN: '印度', TH: '泰国', VN: '越南', MY: '马来西亚', ID: '印度尼西亚', PH: '菲律宾', IT: '意大利', ES: '西班牙', NL: '荷兰', CH: '瑞士', SE: '瑞典', TR: '土耳其', AE: '阿联酋', BR: '巴西', MX: '墨西哥' };
+const GEO_REGION_CN = { Beijing: '北京', Shanghai: '上海', Tianjin: '天津', Chongqing: '重庆', Hebei: '河北', Shanxi: '山西', Liaoning: '辽宁', Jilin: '吉林', Heilongjiang: '黑龙江', Jiangsu: '江苏', Zhejiang: '浙江', Anhui: '安徽', Fujian: '福建', Jiangxi: '江西', Shandong: '山东', Henan: '河南', Hubei: '湖北', Hunan: '湖南', Guangdong: '广东', Hainan: '海南', Sichuan: '四川', Guizhou: '贵州', Yunnan: '云南', Shaanxi: '陕西', Gansu: '甘肃', Qinghai: '青海', 'Inner Mongolia': '内蒙古', Guangxi: '广西', Tibet: '西藏', Ningxia: '宁夏', Xinjiang: '新疆', 'Hong Kong': '香港', Macau: '澳门', Macao: '澳门', Taiwan: '台湾' };
+const GEO_CITY_CN = { Beijing: '北京', Shanghai: '上海', Tianjin: '天津', Chongqing: '重庆', Suzhou: '苏州', Nanjing: '南京', Hangzhou: '杭州', Guangzhou: '广州', Shenzhen: '深圳', Chengdu: '成都', Wuhan: '武汉', "Xi'an": '西安', Xian: '西安', Ningbo: '宁波', Wuxi: '无锡', Changzhou: '常州', Xuzhou: '徐州', Nantong: '南通', Yangzhou: '扬州', Zhenjiang: '镇江', Taizhou: '泰州', Yancheng: '盐城', Huaian: '淮安', Lianyungang: '连云港', Suqian: '宿迁', Hefei: '合肥', Wuhu: '芜湖', Fuzhou: '福州', Xiamen: '厦门', Quanzhou: '泉州', Jinan: '济南', Qingdao: '青岛', Yantai: '烟台', Weifang: '潍坊', Zhengzhou: '郑州', Luoyang: '洛阳', Changsha: '长沙', Nanchang: '南昌', Shenyang: '沈阳', Dalian: '大连', Harbin: '哈尔滨', Changchun: '长春', Shijiazhuang: '石家庄', Taiyuan: '太原', Hohhot: '呼和浩特', Lanzhou: '兰州', Xining: '西宁', Yinchuan: '银川', Urumqi: '乌鲁木齐', Kunming: '昆明', Guiyang: '贵阳', Nanning: '南宁', Guilin: '桂林', Haikou: '海口', Sanya: '三亚', Lhasa: '拉萨', Dongguan: '东莞', Foshan: '佛山', Zhongshan: '中山', Zhuhai: '珠海', Huizhou: '惠州', Shantou: '汕头', Wenzhou: '温州', Jiaxing: '嘉兴', Shaoxing: '绍兴', Jinhua: '金华', Huzhou: '湖州', Zhoushan: '舟山' };
+// 评论里存的地理 JSON（Cloudflare 边缘给的国家/省/市）转可读文字，能中文则中文
 function geoText(geo) {
   if (!geo) return '';
   try {
     const g = JSON.parse(geo);
-    return [g.country, g.region, g.city].filter(Boolean).join(' ');
+    const country = GEO_COUNTRY[g.country] || g.country || '';
+    let region = g.region || '';
+    let city = g.city || '';
+    if (['CN', 'HK', 'TW', 'MO'].includes(g.country)) {
+      region = GEO_REGION_CN[region] || region;
+      city = GEO_CITY_CN[city] || GEO_REGION_CN[city] || city;
+    }
+    // 国家名已含地区/城市名（如中国香港/香港）时不再重复
+    if (region && country.length > region.length && country.endsWith(region)) region = '';
+    if (city && country.length > city.length && country.endsWith(city)) city = '';
+    // 省市同名（如上海/上海）只显示一次
+    const parts = [country, region, city].filter(Boolean);
+    return parts.filter((p, i) => parts.indexOf(p) === i).join(' ');
   } catch { return ''; }
 }
 

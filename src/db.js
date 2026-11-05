@@ -2,7 +2,7 @@
 import { sha256Hex, randomToken, nowSec } from './utils.js';
 
 // 版本号（2026-10-26 用户定）：三段式 2.中.尾——增减功能递增中段、尾段归零；修 bug 只递增尾段。
-export const VERSION = '2.22.1';
+export const VERSION = '2.23.0';
 
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS memos (
@@ -75,6 +75,7 @@ const CREATE_STATEMENTS = [
     status INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     last_login_at INTEGER NOT NULL DEFAULT 0,
+    login_count INTEGER NOT NULL DEFAULT 0,
     last_ip TEXT NOT NULL DEFAULT '',
     last_geo TEXT NOT NULL DEFAULT '',
     last_ua TEXT NOT NULL DEFAULT ''
@@ -239,6 +240,9 @@ export async function initDb(env) {
   }
   if (uNames.length && !uNames.includes('last_ua')) {
     await env.DB.prepare("ALTER TABLE users ADD COLUMN last_ua TEXT NOT NULL DEFAULT ''").run();
+  }
+  if (uNames.length && !uNames.includes('login_count')) {
+    await env.DB.prepare('ALTER TABLE users ADD COLUMN login_count INTEGER NOT NULL DEFAULT 0').run();
   }
   // 建站时间：首次初始化时记为当前时间（页脚「建站第 N 天」用），之后不再变动
   const since = await env.DB.prepare("SELECT value FROM settings WHERE key = 'site_since'").first();

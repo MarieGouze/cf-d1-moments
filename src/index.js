@@ -825,7 +825,7 @@ export default {
         if ((m = path.match(/^\/admin\/trash\/(\d+)\/(restore|purge)$/)) && method === 'POST') {
           return admin.trashAction(env, Number(m[1]), m[2]);
         }
-        if (path === '/admin/users' && method === 'GET') return admin.usersPage(env);
+        if (path === '/admin/users' && method === 'GET') return admin.usersPage(env, url);
         if ((m = path.match(/^\/admin\/users\/(\d+)\/(delete|disable|enable)$/)) && method === 'POST') {
           if (m[2] === 'delete') return admin.userDelete(env, request, Number(m[1]));
           return admin.userSetStatus(env, request, Number(m[1]), m[2] === 'disable' ? 1 : 0);
