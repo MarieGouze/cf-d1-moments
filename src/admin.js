@@ -87,7 +87,7 @@ function page(title, body) {
 }
 
 function nav(active) {
-  return `<div class="card nav"><a href="/admin">📋 动态管理</a><a href="/admin/memos/new">✏️ 发布动态</a><a href="/admin/comments">💬 评论审核</a><a href="/admin/users">👥 注册用户</a><a href="/admin/trash">🗑 垃圾桶</a><a href="/admin/settings">⚙️ 站点设置</a><a href="/admin/export">⬇️ 导出备份</a><a href="/admin/export-zip">📦 完整备份（含文件）</a><a href="/admin/import">📥 恢复备份</a><a href="/" target="_blank">🌐 查看站点</a><a href="/admin/logout">退出</a></div>`;
+  return `<div class="card nav"><a href="/">🌐 查看站点</a><a href="/admin">📋 动态管理</a><a href="/admin/memos/new">✏️ 发布动态</a><a href="/admin/comments">💬 评论审核</a><a href="/admin/users">👥 注册用户</a><a href="/admin/trash">🗑 垃圾桶</a><a href="/admin/settings">⚙️ 站点设置</a><a href="/admin/export">⬇️ 导出备份</a><a href="/admin/export-zip">📦 完整备份（含文件）</a><a href="/admin/import">📥 恢复备份</a><a href="/admin/logout">退出</a></div>`;
 }
 
 async function requireAdmin(env, request) {
