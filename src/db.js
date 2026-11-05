@@ -2,7 +2,7 @@
 import { sha256Hex, randomToken, nowSec } from './utils.js';
 
 // 版本号（2026-10-26 用户定）：三段式 2.中.尾——增减功能递增中段、尾段归零；修 bug 只递增尾段。
-export const VERSION = '2.21.0';
+export const VERSION = '2.22.0';
 
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS memos (
@@ -112,6 +112,9 @@ const CREATE_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_memos_created ON memos(created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_comments_memo ON comments(memo_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, is_read, id)`,
+  `CREATE INDEX IF NOT EXISTS idx_comments_ip ON comments(ip, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_comments_status ON comments(status, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_comments_created ON comments(created_at DESC)`,
 ];
 
 export const DEFAULT_SETTINGS = {
@@ -139,12 +142,14 @@ let initialized = false;
 
 export async function initDb(env) {
   if (initialized) return;
-  for (const sql of CREATE_STATEMENTS) {
-    await env.DB.prepare(sql).run();
-  }
-  for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
-    await env.DB.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').bind(k, v).run();
-  }
+  // 建表 + 默认设置合并成一次 batch：冷启动从几十趟往返降到一趟
+  const stmts = CREATE_STATEMENTS.map((sql) => env.DB.prepare(sql));
+  const entries = Object.entries(DEFAULT_SETTINGS);
+  stmts.push(
+    env.DB.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ${entries.map(() => '(?, ?)').join(', ')}`)
+      .bind(...entries.flatMap(([k, v]) => [k, v]))
+  );
+  await env.DB.batch(stmts);
   // 迁移：comments.parent_id / reply_to（评论回复：挂到顶层评论下，reply_to 存被回复者昵称）
   const cCols = await env.DB.prepare("PRAGMA table_info(comments)").all();
   const cNames = (cCols.results || []).map((c) => c.name);
@@ -283,6 +288,7 @@ export async function createSession(env) {
   const token = randomToken();
   const hash = await sha256Hex(token);
   const now = nowSec();
+  await env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(now).run();
   await env.DB.prepare('INSERT INTO sessions (token_hash, created_at, expires_at) VALUES (?, ?, ?)')
     .bind(hash, now, now + 30 * 24 * 3600).run();
   return token;
@@ -316,6 +322,7 @@ export async function createUserSession(env, userId) {
   const token = randomToken();
   const hash = await sha256Hex(token);
   const now = nowSec();
+  await env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(now).run();
   await env.DB.prepare('INSERT INTO sessions (token_hash, created_at, expires_at, user_id) VALUES (?, ?, ?, ?)')
     .bind(hash, now, now + 30 * 24 * 3600, userId).run();
   return token;

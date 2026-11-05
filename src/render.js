@@ -258,10 +258,22 @@ function toggleTheme(){
   document.documentElement.setAttribute('data-theme',cur);
   try{localStorage.setItem('mm_theme',cur)}catch(e){}
 }
+function moveCmtHome(id){
+  var f=document.getElementById('cmt-form-'+id);
+  var home=document.getElementById('cmt-form-home-'+id);
+  if(f && home){ home.after(f); f.dataset.moved=''; }
+}
 function toggleCmt(id){
   var f=document.getElementById('cmt-form-'+id);
-  if(f){
+  if(!f) return;
+  if(f.dataset.moved==='1'){
+    moveCmtHome(id);
+    cancelReplyState(id);
+    f.classList.add('open');
+  } else {
     f.classList.toggle('open');
+  }
+  if(f.classList.contains('open')){
     var img=f.querySelector('img.cap');
     if(img && !img.getAttribute('src')) img.src='/captcha?t='+Date.now();
   }
@@ -270,6 +282,8 @@ function replyTo(btn, memoId, rootId, targetId){
   var name=btn.getAttribute('data-rname')||'';
   var wrap=document.getElementById('cmt-form-'+memoId);
   if(wrap){
+    var anchor=btn.closest('.replies')||btn.closest('.cmt')||btn.closest('.cmt-line');
+    if(anchor && anchor.parentNode){ anchor.after(wrap); wrap.dataset.moved='1'; }
     wrap.classList.add('open');
     var img=wrap.querySelector('img.cap');
     if(img && !img.getAttribute('src')) img.src='/captcha?t='+Date.now();
@@ -279,7 +293,8 @@ function replyTo(btn, memoId, rootId, targetId){
   form.querySelector('input[name=parent_id]').value=rootId;
   form.querySelector('input[name=reply_target]').value=targetId||rootId;
   form.querySelector('input[name=reply_to]').value=name;
-  document.getElementById('cancel-reply-'+memoId).style.display='';
+  var crBtn=document.getElementById('cancel-reply-'+memoId);
+  if(crBtn){ crBtn.style.display=''; crBtn.textContent='取消回复'; }
   var ta=form.querySelector('textarea');
   ta.placeholder='回复 @'+name+' …';
   ta.focus();
@@ -325,6 +340,8 @@ document.addEventListener('DOMContentLoaded', function(){
   var name=q.get('rname')||'';
   var wrap=document.querySelector('.cmt-form'); if(!wrap) return;
   var memoId=wrap.id.replace('cmt-form-','');
+  var target=document.getElementById('cmt-'+(q.get('rtarget')||rid));
+  if(target){ var anc=target.closest('.replies')||target; anc.after(wrap); wrap.dataset.moved='1'; }
   wrap.classList.add('open');
   var capImg=wrap.querySelector('img.cap');
   if(capImg && !capImg.getAttribute('src')) capImg.src='/captcha?t='+Date.now();
@@ -333,7 +350,7 @@ document.addEventListener('DOMContentLoaded', function(){
   form.querySelector('input[name=reply_target]').value=q.get('rtarget')||rid;
   form.querySelector('input[name=reply_to]').value=name;
   var cancel=document.getElementById('cancel-reply-'+memoId);
-  if(cancel) cancel.style.display='';
+  if(cancel){ cancel.style.display=''; cancel.textContent='取消回复'; }
   var ta=form.querySelector('textarea');
   if(name) ta.placeholder='回复 @'+name+' …';
   var anchor=document.getElementById('comments');
@@ -359,7 +376,19 @@ function insertEmoji(memoId, btn){
   ta.focus();
   try{ ta.setSelectionRange(pos,pos); }catch(err){}
 }
+function cancelReplyState(memoId){
+  var form=document.querySelector('#cmt-form-'+memoId+' form');
+  if(!form) return;
+  form.querySelector('input[name=parent_id]').value='0';
+  form.querySelector('input[name=reply_target]').value='0';
+  form.querySelector('input[name=reply_to]').value='';
+  var crBtn=document.getElementById('cancel-reply-'+memoId);
+  if(crBtn){ crBtn.style.display=''; crBtn.textContent='取消'; }
+  var ta=form.querySelector('textarea');
+  if(ta) ta.placeholder=ta.getAttribute('data-ph')||'写下你的评论';
+}
 function cancelReply(memoId){
+  moveCmtHome(memoId);
   var wrap=document.getElementById('cmt-form-'+memoId);
   if(wrap) wrap.classList.remove('open');
   var form=document.querySelector('#cmt-form-'+memoId+' form');
@@ -367,8 +396,10 @@ function cancelReply(memoId){
   form.querySelector('input[name=parent_id]').value='0';
   form.querySelector('input[name=reply_target]').value='0';
   form.querySelector('input[name=reply_to]').value='';
-  document.getElementById('cancel-reply-'+memoId).style.display='none';
+  var crBtn2=document.getElementById('cancel-reply-'+memoId);
+  if(crBtn2){ crBtn2.style.display=''; crBtn2.textContent='取消'; }
   var ta=form.querySelector('textarea');
+  ta.value='';
   ta.placeholder=ta.getAttribute('data-ph')||'写下你的评论';
 }
 function refreshCap(img){ img.src='/captcha?t='+Date.now(); }
@@ -615,6 +646,9 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
   const delCmtBtn = (c) => isAdmin
     ? `<form method="post" action="/admin/comments/${c.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条留言？删除后移入垃圾桶。')"><button type="submit" class="reply-btn del" title="删除" aria-label="删除">&#x1F5D1;&#xFE0E;</button></form>`
     : '';
+  const myDelCmtBtn = (c) => !isAdmin && user && c.name === user.username
+    ? `<form method="post" action="/comments/${c.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条留言？')"><button type="submit" class="reply-btn del" title="删除我的留言" aria-label="删除">&#x1F5D1;&#xFE0E;</button></form>`
+    : '';
   if (!detail) {
     const total = memo.comment_count || comments.length;
     if (comments.length || total > 0) {
@@ -625,7 +659,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
           ? `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="ao-hidden">🔒 隐藏评论</span></div>`
           : `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}${c.reply_to ? ` <span class="at${atCls(c.reply_to)}">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${c.flag === 'spam' && isAdmin ? '<span class="ao-tag">垃圾评论</span>' : ''}${isAdmin
           ? `<button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${c.parent_id || c.id},${c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>`
-          : `<a class="reply-btn" href="/memo/${memo.id}?reply=${c.parent_id || c.id}&rtarget=${c.id}&rname=${encodeURIComponent(c.name)}#comments" title="回复" aria-label="回复"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></a>`}${delCmtBtn(c)}</div>`;
+          : `<a class="reply-btn" href="/memo/${memo.id}?reply=${c.parent_id || c.id}&rtarget=${c.id}&rname=${encodeURIComponent(c.name)}#comments" title="回复" aria-label="回复"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></a>`}${delCmtBtn(c)}${myDelCmtBtn(c)}</div>`;
       const first = comments.slice(0, 2).map(line).join('');
       const rest = comments.slice(2);
       const restHtml = rest.length
@@ -645,10 +679,10 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     }
     const row = (c, rootId) =>
       c.flag === 'spam' && !isAdmin
-        ? `<div class="cmt">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="invalid-cmt">无效评论待修改</span><span class="when">${timeAgo(c.created_at)}</span></div>`
+        ? `<div class="cmt" id="cmt-${c.id}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="invalid-cmt">无效评论待修改</span><span class="when">${timeAgo(c.created_at)}</span></div>`
         : c.admin_only && !isAdmin
-        ? `<div class="cmt">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="ao-hidden">🔒 隐藏评论</span><span class="when">${timeAgo(c.created_at)}</span></div>`
-        : `<div class="cmt">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}${c.reply_to ? ` <span class="at${atCls(c.reply_to)}">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${c.flag === 'spam' && isAdmin ? '<span class="ao-tag">垃圾评论</span>' : ''}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId},${c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}</div>`;
+        ? `<div class="cmt" id="cmt-${c.id}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="ao-hidden">🔒 隐藏评论</span><span class="when">${timeAgo(c.created_at)}</span></div>`
+        : `<div class="cmt" id="cmt-${c.id}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}${c.reply_to ? ` <span class="at${atCls(c.reply_to)}">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${c.flag === 'spam' && isAdmin ? '<span class="ao-tag">垃圾评论</span>' : ''}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId},${c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}${myDelCmtBtn(c)}</div>`;
     cmtHtml = `<div class="cmt-box">${roots
       .map((r) => row(r, r.id) + (byParent.get(r.id) || []).map((c) => `<div class="replies">${row(c, r.id)}</div>`).join(''))
       .join('')}</div>`;
@@ -669,7 +703,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     !locked && settings.comments_enabled === '1'
       ? membersOnly
         ? `<div class="cmt-form" id="cmt-form-${memo.id}"><div class="files-gated" style="margin:4px 0">🔒 本动态仅注册用户可评论，<a href="/login?next=/memo/${memo.id}">登录</a>${settings.registration_open === '1' ? ` 或 <a href="/register?next=/memo/${memo.id}">注册</a>` : ''}后即可评论</div></div>`
-        : `<div class="cmt-form" id="cmt-form-${memo.id}">
+        : `<span id="cmt-form-home-${memo.id}" hidden></span><div class="cmt-form" id="cmt-form-${memo.id}">
           <form method="post" action="/memo/${memo.id}/comment">
             <input type="text" name="website" tabindex="-1" autocomplete="off" style="display:none" aria-hidden="true">
             <input type="hidden" name="ft" value="${Math.floor(Date.now() / 1000)}">
@@ -678,7 +712,7 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
             <input type="hidden" name="reply_target" value="0">
             ${identityHtml}${capRow}
             <textarea name="content" rows="3" maxlength="${user || isAdmin ? 80 : 50}" data-ph="写下你的评论（最多 ${user || isAdmin ? 80 : 50} 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" placeholder="写下你的评论（最多 ${user || isAdmin ? 80 : 50} 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" required></textarea>
-            <div class="btn-row"><button class="btn" type="submit">发表评论</button><button class="btn ghost" type="button" id="cancel-reply-${memo.id}" style="display:none" onclick="cancelReply(${memo.id})">取消回复</button>${isAdmin ? '' : `<label class="ao-check"><input type="checkbox" name="admin_only" value="1">仅管理员可见</label>`}<button class="emoji-toggle" type="button" title="插入表情" onclick="toggleEmoji(${memo.id})">😊</button></div>
+            <div class="btn-row"><button class="btn" type="submit">发表评论</button><button class="btn ghost" type="button" id="cancel-reply-${memo.id}" onclick="cancelReply(${memo.id})">取消</button>${isAdmin ? '' : `<label class="ao-check"><input type="checkbox" name="admin_only" value="1">仅管理员可见</label>`}<button class="emoji-toggle" type="button" title="插入表情" onclick="toggleEmoji(${memo.id})">😊</button></div>
             <div class="emoji-panel" id="emoji-panel-${memo.id}">${EMOJIS.map((e) => `<button type="button" class="emo" onclick="insertEmoji(${memo.id},this)">${e}</button>`).join('')}</div>
           </form>
         </div>`

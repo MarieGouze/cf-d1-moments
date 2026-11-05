@@ -30,8 +30,9 @@ a{color:#576b95;text-decoration:none}
 .ok{background:#e9f7e9;border:1px solid #bfe3bf;color:#1c5c1c;border-radius:10px;padding:10px 14px;margin:12px 0;font-size:14px}
 table{width:100%;border-collapse:collapse;font-size:14px}
 td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
-.u-ip{word-break:break-all;max-width:200px}
+.u-ip{word-break:break-all;min-width:150px;max-width:220px}
 .u-dev{max-width:220px}
+.u-table{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .u-cards{display:none}
 .u-card{border:1px solid #eee;border-radius:10px;padding:10px 12px;margin:10px 0}
 .u-card .u-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -1348,6 +1349,27 @@ export async function userPostDelete(env, request, id) {
   const m = await env.DB.prepare('SELECT author_id FROM memos WHERE id = ?').bind(id).first();
   if (!m || m.author_id !== g.user.id) return redirect('/');
   return memoDelete(env, request, id);
+}
+
+// 注册用户删除自己的留言：注册名受保护、游客冒用不了，留言上的名字与登录用户名对上即本人所发。
+// 处理与管理员删留言一致：移入垃圾桶（站长可恢复）、连带清掉这条留言产生的通知。
+export async function userCommentDelete(env, request, id) {
+  const user = await currentUser(env, request);
+  if (!user) return redirect('/login');
+  const c = await env.DB.prepare('SELECT * FROM comments WHERE id = ?').bind(id).first();
+  if (!c || c.name !== user.username) return redirect('/');
+  await toTrash(env, 'comment', id, `${c.name}：${String(c.content || '').slice(0, 60)}`, { comment: c });
+  await env.DB.prepare('DELETE FROM comments WHERE id = ?').bind(id).run();
+  await env.DB.prepare('DELETE FROM notifications WHERE comment_id = ?').bind(id).run();
+  await purgeTrash(env);
+  try {
+    const ref = request.headers.get('referer');
+    if (ref) {
+      const p = new URL(ref).pathname;
+      if (p === '/' || p.startsWith('/memo/') || p.startsWith('/tag/')) return redirect(p);
+    }
+  } catch { /* 忽略来源解析失败 */ }
+  return redirect('/');
 }
 
 // ---------------- 评论审核 ----------------

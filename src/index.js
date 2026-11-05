@@ -99,9 +99,15 @@ async function recordVisit(env, request) {
     const ua = request.headers.get('user-agent') || '';
     const hash = (await sha256Hex(`${ip}|${ua}`)).slice(0, 32);
     const now = nowSec();
-    await env.DB.prepare(
-      'INSERT INTO visitors (ip_hash, first_seen, last_seen) VALUES (?, ?, ?) ON CONFLICT(ip_hash) DO UPDATE SET last_seen = excluded.last_seen'
+    const ins = await env.DB.prepare(
+      'INSERT OR IGNORE INTO visitors (ip_hash, first_seen, last_seen) VALUES (?, ?, ?)'
     ).bind(hash, now, now).run();
+    if (ins && ins.meta && ins.meta.changes > 0) {
+      // 新访客：页脚累计计数 +1（计数器存 settings，展示时不再全表 COUNT）
+      await env.DB.prepare(
+        "INSERT INTO settings (key, value) VALUES ('visitor_count', '1') ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1"
+      ).run();
+    }
   } catch { /* 计数失败不影响页面 */ }
 }
 
@@ -117,8 +123,15 @@ async function withUsage(env, settings) {
       const days = Math.max(1, dayIdx(nowSec()) - dayIdx(since) + 1);
       out.site_days_text = `建站第 ${days} 天`;
     }
-    const vc = await env.DB.prepare('SELECT COUNT(*) AS c FROM visitors').first();
-    if (vc) out.visitor_text = `累计到访 ${vc.c} 人`;
+    let vcount = parseInt(settings.visitor_count || '', 10);
+    if (!Number.isFinite(vcount)) {
+      const vc = await env.DB.prepare('SELECT COUNT(*) AS c FROM visitors').first();
+      vcount = vc ? vc.c : 0;
+      await env.DB.prepare(
+        "INSERT INTO settings (key, value) VALUES ('visitor_count', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      ).bind(String(vcount)).run();
+    }
+    out.visitor_text = `累计到访 ${vcount} 人`;
   } catch { /* 表未建好时不显示 */ }
   // 全账号今日请求：Cloudflare 官方统计，由外部定时任务每 15 分钟写入 settings.acct_usage；只显示当天的数据
   const today = new Date().toISOString().slice(0, 10);
@@ -672,17 +685,17 @@ async function downloadCounts(env, memos) {
   return map;
 }
 
-async function feed(env) {
+async function feed(env, origin = '') {
   const settings = await getSettings(env);
   const { memos } = await listMemos(env, { page: 1 });
   const items = memos
     .map((m) => {
       const text = m.title || (m.members_only ? '（仅注册用户可见）' : m.view_password_hash ? '（密码保护）' : m.content_gated ? '（回复后可见）' : plainTextExcerpt(m.content_md, 120) || '（图片动态）');
       const desc = m.members_only ? '本动态仅注册用户可见，请登录网站查看' : m.view_password_hash ? '本动态已设密码保护，请到网站输入密码查看' : m.content_gated ? '本动态内容需回复后可见' : plainTextExcerpt(m.content_md, 300);
-      return `<item><title>${escapeXml(text)}</title><link>/memo/${m.id}</link><guid>/memo/${m.id}</guid><pubDate>${new Date(m.created_at * 1000).toUTCString()}</pubDate><description>${escapeXml(desc)}</description></item>`;
+      return `<item><title>${escapeXml(text)}</title><link>${origin}/memo/${m.id}</link><guid>${origin}/memo/${m.id}</guid><pubDate>${new Date(m.created_at * 1000).toUTCString()}</pubDate><description>${escapeXml(desc)}</description></item>`;
     })
     .join('');
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel><title>${escapeXml(settings.site_name)}</title><link>/</link><description>${escapeXml(settings.signature || '')}</description>${items}</channel></rss>`;
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel><title>${escapeXml(settings.site_name)}</title><link>${origin}/</link><description>${escapeXml(settings.signature || '')}</description>${items}</channel></rss>`;
   return new Response(xml, { headers: { 'Content-Type': 'application/rss+xml; charset=utf-8' } });
 }
 
@@ -776,7 +789,7 @@ export default {
       if (path.startsWith('/dl/') && method === 'GET') {
         return dlGet(env, decodeURIComponent(path.slice('/dl/'.length)));
       }
-      if (path === '/feed.xml' && method === 'GET') return feed(env);
+      if (path === '/feed.xml' && method === 'GET') return feed(env, url.origin);
       if (path === '/cover/bing' && method === 'GET') return coverBing(env, ctx, request, await getSettings(env));
       if (path === '/cover/bing/m' && method === 'GET') return coverBing(env, ctx, request, await getSettings(env), true);
 
@@ -896,6 +909,9 @@ export default {
       }
       if ((m = path.match(/^\/post\/(\d+)\/delete$/)) && method === 'POST') {
         return admin.userPostDelete(env, request, Number(m[1]));
+      }
+      if ((m = path.match(/^\/comments\/(\d+)\/delete$/)) && method === 'POST') {
+        return admin.userCommentDelete(env, request, Number(m[1]));
       }
       return new Response('Not Found', { status: 404 });
     } catch (err) {
