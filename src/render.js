@@ -31,6 +31,7 @@ a{color:var(--accent);text-decoration:none}
 .hero .avatar{position:absolute;right:16px;bottom:-22px;width:68px;height:68px;border-radius:10px;
   border:3px solid #fff;background:#cfd4dd center/cover no-repeat;box-shadow:var(--shadow)}
 .hero .avatar-fallback{display:flex;align-items:center;justify-content:center;font-size:28px;color:#fff;background:#7a8494}
+@media (max-width:640px){.hero .avatar{width:52px;height:52px;bottom:-18px;border-radius:9px}.hero .avatar-fallback{font-size:22px}.hero .site-name{right:80px;bottom:-17px;font-size:18px}.head-meta{margin-top:24px}}
 .head-meta{margin:28px 6px 0;padding-bottom:3px;text-align:right;color:#fff;font-size:13px;min-height:18px;border-bottom:1px solid rgba(255,255,255,.35);text-shadow:0 1px 3px rgba(0,0,0,.5)}
 .head-box .chip,.head-box .icon-btn{background:none;border:none;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.55)}
 .head-box .chip.on{background:none;color:#fff;font-weight:700;text-decoration:underline;text-underline-offset:3px}
