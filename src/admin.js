@@ -24,6 +24,7 @@ label{font-size:13px;color:#555;font-weight:600}
 .btn.danger{background:#d33}
 a{color:#576b95;text-decoration:none}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.cap{height:38px;border:1px solid #ddd;border-radius:8px;cursor:pointer;background:#fff;margin:5px 0 12px}
 .nav a{margin-right:14px;font-size:14px}
 .err{background:#fdecec;border:1px solid #f3c2c2;color:#8c2323;border-radius:10px;padding:10px 14px;margin:12px 0;font-size:14px}
 .ok{background:#e9f7e9;border:1px solid #bfe3bf;color:#1c5c1c;border-radius:10px;padding:10px 14px;margin:12px 0;font-size:14px}
@@ -157,6 +158,8 @@ export async function loginPage(env, url) {
   let err = '';
   if (url.searchParams.get('e') === 'lock') {
     err = `<div class="err">密码错误次数过多，已暂停登录，请约 ${esc(url.searchParams.get('m') || '10')} 分钟后再试。</div>`;
+  } else if (url.searchParams.get('e') === 'cap') {
+    err = `<div class="err">验证码不对，请重新填写。</div>`;
   } else if (url.searchParams.get('e')) {
     const n = url.searchParams.get('n');
     err = `<div class="err">密码不对，请重试。${n ? `（已错 ${esc(n)} 次，错满 5 次将暂停 10 分钟）` : ''}</div>`;
@@ -165,6 +168,8 @@ export async function loginPage(env, url) {
     <div class="card"><h1>🔐 后台登录</h1>${err}
     <form method="post" action="/admin/login">
       <label>管理员密码</label><input name="password" type="password" required autofocus>
+      <label>验证码</label>
+      <div class="row"><img class="cap" alt="验证码" title="点图刷新" onclick="this.src='/captcha?t='+Date.now()" src="/captcha"><input name="captcha" maxlength="4" placeholder="输入图中数字" required style="max-width:140px"></div>
       <button class="btn" type="submit">登录</button>
     </form>
     <p class="hint"><a href="/">← 回到首页</a></p></div>`);
@@ -178,6 +183,11 @@ export async function loginPost(env, request) {
     return redirect(`/admin/login?e=lock&m=${Math.ceil((rec.u - now) / 60)}`);
   }
   const form = await request.formData();
+  const settings = await getSettings(env);
+  const cookies = parseCookies(request);
+  if (!(await verifyCaptcha(settings.site_secret, cookies.mm_captcha, form.get('captcha')))) {
+    return redirect('/admin/login?e=cap');
+  }
   const pw = String(form.get('password') || '');
   const hash = await effectiveAdminHash(env);
   if (!hash || (await sha256Hex(pw)) !== hash) {
