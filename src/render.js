@@ -274,6 +274,12 @@ function toggleCmt(id){
     f.classList.toggle('open');
   }
   if(f.classList.contains('open')){
+    var rest=document.getElementById('cmt-rest-'+id);
+    if(rest && rest.classList.contains('open')){
+      rest.classList.remove('open');
+      var more=rest.nextElementSibling;
+      if(more) more.textContent='共 '+more.getAttribute('data-total')+' 条评论，点击查看全部';
+    }
     var img=f.querySelector('img.cap');
     if(img && !img.getAttribute('src')) img.src='/captcha?t='+Date.now();
   }
