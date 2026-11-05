@@ -134,6 +134,7 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .cmt-rest{display:none}
 .cmt-rest.open{display:block}
 .cmt-line{padding:1px 0;word-break:break-word}
+.cmt-line.sub{margin-left:14px;padding-left:10px;border-left:2px solid var(--line)}
 .cmt-line .n{color:var(--accent);font-weight:600}
 .cmt-line .at{color:var(--accent)}
 .cmt-more{display:inline-block;margin-top:3px;font-size:13px;color:var(--sub)}
@@ -660,10 +661,10 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
     if (comments.length || total > 0) {
       const line = (c) =>
         c.flag === 'spam' && !isAdmin
-          ? `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="invalid-cmt">无效评论待修改</span></div>`
+          ? `<div class="cmt-line${c.parent_id ? ' sub' : ''}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="invalid-cmt">无效评论待修改</span></div>`
           : c.admin_only && !isAdmin
-          ? `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="ao-hidden">🔒 隐藏评论</span></div>`
-          : `<div class="cmt-line">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}${c.reply_to ? ` <span class="at${atCls(c.reply_to)}">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${c.flag === 'spam' && isAdmin ? '<span class="ao-tag">垃圾评论</span>' : ''}${isAdmin
+          ? `<div class="cmt-line${c.parent_id ? ' sub' : ''}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="ao-hidden">🔒 隐藏评论</span></div>`
+          : `<div class="cmt-line${c.parent_id ? ' sub' : ''}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}${c.reply_to ? ` <span class="at${atCls(c.reply_to)}">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${c.flag === 'spam' && isAdmin ? '<span class="ao-tag">垃圾评论</span>' : ''}${isAdmin
           ? `<button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${c.parent_id || c.id},${c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>`
           : `<a class="reply-btn" href="/memo/${memo.id}?reply=${c.parent_id || c.id}&rtarget=${c.id}&rname=${encodeURIComponent(c.name)}#comments" title="回复" aria-label="回复"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></a>`}${delCmtBtn(c)}${myDelCmtBtn(c)}</div>`;
       const first = comments.slice(0, 2).map(line).join('');
