@@ -701,17 +701,32 @@ async function feed(env, origin = '') {
 
 async function coverBing(env, ctx, request, settings, mobile = false) {
   const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
-  const cacheKey = new Request(new URL('/cover/bing/' + (mobile ? 'm/' : '') + today, request.url));
+  const cacheKey = new Request(new URL('/cover/bing/' + (mobile ? 'm480/' : 'd1366/') + today, request.url));
   const cache = caches.default;
   try {
     const hit = await cache.match(cacheKey);
     if (hit) return hit;
   } catch { /* 缓存不可用就现取 */ }
+  // R2 持久层（与上传图片同一套储存）：当天图存过就直接从 R2 出，不再依赖第三方镜像的实时可用性
+  const r2Key = 'bing-cover/' + today + (mobile ? '-m' : '') + '.jpg';
   try {
-    const resp = await fetch(mobile ? 'https://bing.ee123.net/img/?size=720x1280' : 'https://bing.ee123.net/img/', { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const obj = await env.MEDIA.get(r2Key);
+    if (obj) {
+      const headers = new Headers();
+      obj.writeHttpMetadata(headers);
+      if (!headers.get('Content-Type')) headers.set('Content-Type', 'image/jpeg');
+      headers.set('Cache-Control', 'public, max-age=43200');
+      const out = new Response(obj.body, { headers });
+      try { ctx.waitUntil(cache.put(cacheKey, out.clone())); } catch { /* 存不进缓存不影响出图 */ }
+      return out;
+    }
+  } catch { /* R2 读不到就现取 */ }
+  try {
+    const resp = await fetch(mobile ? 'https://bing.ee123.net/img/?size=480x800' : 'https://bing.ee123.net/img/?size=1366x768', { headers: { 'User-Agent': 'Mozilla/5.0' } });
     const ct = resp.headers.get('Content-Type') || '';
     if (resp.ok && ct.includes('image')) {
       const buf = await resp.arrayBuffer();
+      try { ctx.waitUntil(env.MEDIA.put(r2Key, buf, { httpMetadata: { contentType: ct } })); } catch { /* 存不进 R2 不影响出图 */ }
       const out = new Response(buf, { headers: { 'Content-Type': ct, 'Cache-Control': 'public, max-age=43200' } });
       try { ctx.waitUntil(cache.put(cacheKey, out.clone())); } catch { /* 存不进缓存不影响出图 */ }
       return out;
