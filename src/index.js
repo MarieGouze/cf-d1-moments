@@ -211,8 +211,9 @@ async function homePage(env, request, url, { tag = '' } = {}) {
   );
   const { avatars: userAvatars, ids: userIds } = await userMapsFor(env, commentsList.flat());
   const dlCounts = await downloadCounts(env, memos);
+  const pageCap = !adminView && !user && settings.comments_enabled === '1' ? await createCaptcha(settings.site_secret) : null;
   const cards = memos.map((m, i) =>
-    memoCard(m, settings, { comments: commentsList[i], liked: liked.has(m.id), isAdmin: adminView, user, userAvatars, userIds, filesUnlocked: unlocked.has(m.id), pwLocked: !viewOk[i], membersLocked: mLocked[i], dlCounts, forum: settings.forum_mode === '1' })
+    memoCard(m, settings, { comments: commentsList[i], liked: liked.has(m.id), isAdmin: adminView, user, userAvatars, userIds, filesUnlocked: unlocked.has(m.id), pwLocked: !viewOk[i], membersLocked: mLocked[i], dlCounts, forum: settings.forum_mode === '1', capV: pageCap ? pageCap.cookieValue : '', capSvg: pageCap ? pageCap.svg : '' })
   );
   const base = tag ? `/tag/${encodeURIComponent(tag)}` : '/';
   const announce = (settings.announce_text || '').trim();
@@ -271,7 +272,8 @@ async function memoDetail(env, request, id) {
   }
   const { avatars: userAvatars, ids: userIds } = await userMapsFor(env, comments);
   const dlCounts = await downloadCounts(env, [memo]);
-  const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, user, userAvatars, userIds, filesUnlocked: unlocked.has(id), pwLocked: !viewOk, membersLocked, unlockErr, dlCounts })}</div>
+  const pageCap = !adminView && !user && settings.comments_enabled === '1' ? await createCaptcha(settings.site_secret) : null;
+  const body = `${noticeHtml(url.searchParams.get('c'))}<div class="feed-box">${memoCard(memo, settings, { comments, liked: liked.has(id), detail: true, isAdmin: adminView, user, userAvatars, userIds, filesUnlocked: unlocked.has(id), pwLocked: !viewOk, membersLocked, unlockErr, dlCounts, capV: pageCap ? pageCap.cookieValue : '', capSvg: pageCap ? pageCap.svg : '' })}</div>
     <div class="pager"><a href="/">← 回到时间线</a></div>`;
   const pageTitle = memo.title || (viewOk && !membersLocked ? plainTextExcerpt(memo.content_md, 40) : '') || settings.site_name;
   const notifCount = user ? await unreadNotifCount(env, user.id) : 0;
@@ -365,7 +367,7 @@ async function commentPost(env, request, id) {
   // 管理员与注册用户免验证码；游客只验图形验证码
   if (!adminReq && !user) {
     const cookies = parseCookies(request);
-    const okCap = await verifyCaptcha(settings.site_secret, cookies.mm_captcha, form.get('captcha'));
+    const okCap = await verifyCaptcha(settings.site_secret, form.get('cap') || cookies.mm_captcha, form.get('captcha'));
     if (!okCap) return redirect(`${back}?c=captcha`);
   }
   const ip = clientIp(request);
@@ -504,7 +506,7 @@ async function dmSend(env, request) {
   if (!ident.adminReq) {
     // 普通用户每封都要过图形验证码（用户指定），并限制频率防骚扰
     const cookies = parseCookies(request);
-    const okCap = await verifyCaptcha(ident.settings.site_secret, cookies.mm_captcha, form.get('captcha'));
+    const okCap = await verifyCaptcha(ident.settings.site_secret, form.get('cap') || cookies.mm_captcha, form.get('captcha'));
     if (!okCap) return fail('验证码不对');
     const recent = await env.DB.prepare('SELECT COUNT(*) AS c FROM messages WHERE from_id = ? AND created_at > ?').bind(ident.me.id, now - 60).first();
     if (recent && recent.c >= 5) return fail('发送太频繁，请稍后再试');
@@ -581,7 +583,8 @@ async function threadPage(env, request, otherId) {
   }).join('');
   const url = new URL(request.url);
   const err = url.searchParams.get('e');
-  const capRow = ident.adminReq ? '' : `<div class="row"><img class="cap" alt="验证码" title="点图刷新" onclick="refreshCap(this)" src="/captcha?t=${Date.now()}">
+  const dmCap = ident.adminReq ? null : await createCaptcha(ident.settings.site_secret);
+  const capRow = ident.adminReq ? '' : `<div class="row"><span class="cap-box" title="点图刷新" style="cursor:pointer;display:inline-flex" onclick="refreshCap2(this)">${dmCap.svg}</span><input type="hidden" name="cap" class="cap-v" value="${dmCap.cookieValue}">
               <input name="captcha" maxlength="4" placeholder="验证码" required style="max-width:110px"></div>`;
   const body = `<div class="feed-box"><div class="ntf-head">与 ${escapeXml(otherName)} 的私信<form class="ntf-clear" method="post" action="/dm/delete-conv" onsubmit="return confirm('删除与「${escapeXml(otherName)}」的对话？只删你这边的记录，对方不受影响。')"><input type="hidden" name="other" value="${otherId}"><button type="submit">删除对话</button></form></div>
     ${err ? `<div class="notice">${escapeXml(err)}</div>` : ''}
@@ -784,6 +787,11 @@ export default {
         ctx.waitUntil(recordVisit(env, request));
       }
 
+      if (path === '/captcha/challenge' && method === 'GET') {
+        const settings = await getSettings(env);
+        const cap = await createCaptcha(settings.site_secret);
+        return new Response(JSON.stringify({ v: cap.cookieValue, svg: cap.svg }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+      }
       if (path === '/captcha' && method === 'GET') {
         const settings = await getSettings(env);
         const cap = await createCaptcha(settings.site_secret);
@@ -812,7 +820,6 @@ export default {
       if (path === '/admin/setup') {
         return method === 'GET' ? admin.setupPage(env, url) : admin.setupPost(env, request);
       }
-      if (path === '/admin/login/captcha' && method === 'GET') return admin.loginCaptcha(env);
       if (path === '/admin/login') {
         return method === 'GET' ? admin.loginPage(env, url) : admin.loginPost(env, request);
       }

@@ -425,6 +425,18 @@ function cancelReply(memoId){
   ta.placeholder=ta.getAttribute('data-ph')||'写下你的评论';
 }
 function refreshCap(img){ img.src='/captcha?t='+Date.now(); }
+function refreshCap2(box){
+  fetch('/captcha/challenge').then(function(r){return r.json()}).then(function(j){
+    box.innerHTML=j.svg;
+    var row=box.parentElement; var inp=row ? row.querySelector('.cap-v') : null; if(inp) inp.value=j.v;
+  }).catch(function(){});
+}
+function fetchDmCap(){
+  fetch('/captcha/challenge').then(function(r){return r.json()}).then(function(j){
+    var b=document.getElementById('dm-cap-box'); if(b) b.innerHTML=j.svg;
+    var v=document.getElementById('dm-cap-v'); if(v) v.value=j.v;
+  }).catch(function(){});
+}
 function toggleForum(btn){
   var item=btn.closest('.fr-item'); if(!item) return;
   var body=item.querySelector('.fr-body');
@@ -440,7 +452,7 @@ function openDm(uid, name){
   document.getElementById('dm-err').textContent='';
   document.getElementById('dm-text').value='';
   var cap=document.getElementById('dm-cap'); if(cap) cap.value='';
-  var img=document.getElementById('dm-cap-img'); if(img) img.src='/captcha?t='+Date.now();
+  fetchDmCap();
   m.classList.add('open');
   document.getElementById('dm-text').focus();
 }
@@ -456,13 +468,14 @@ async function sendDm(){
   fd.set('content', document.getElementById('dm-text').value.trim());
   fd.set('ajax', '1');
   var cap=document.getElementById('dm-cap'); if(cap) fd.set('captcha', cap.value);
+  var capv=document.getElementById('dm-cap-v'); if(capv) fd.set('cap', capv.value);
   try{
     var r=await fetch('/dm/send', {method:'POST', body: fd});
     var d=await r.json();
     if(d && d.ok){ closeDm(); }
     else{
       err.textContent=(d && d.error) || '发送失败';
-      var img=document.getElementById('dm-cap-img'); if(img) img.src='/captcha?t='+Date.now();
+      fetchDmCap();
     }
   }catch(e){ err.textContent='发送失败，请重试'; }
 }
@@ -606,7 +619,7 @@ function contentHtml(memo, detail) {
   return renderContent(memo.content_md);
 }
 
-export function memoCard(memo, settings, { comments = [], liked = false, detail = false, isAdmin = false, user = null, userAvatars = {}, userIds = {}, filesUnlocked = false, pwLocked = false, membersLocked = false, unlockErr = '', dlCounts = {}, forum = false } = {}) {
+export function memoCard(memo, settings, { comments = [], liked = false, detail = false, isAdmin = false, user = null, userAvatars = {}, userIds = {}, filesUnlocked = false, pwLocked = false, membersLocked = false, unlockErr = '', dlCounts = {}, forum = false, capV = '', capSvg = '' } = {}) {
   const media = parseJsonSafe(memo.media, []);
   const tags = String(memo.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
   const avatarStyle = settings.avatar_url
@@ -724,7 +737,10 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       : `<div class="hint" style="margin-bottom:8px">以游客身份评论，昵称随机显示为「游客XXX」，只需填验证码 · <a href="/login">登录</a>${settings.registration_open === '1' ? ' / <a href="/register">注册</a>' : ''}</div>`;
   const capRow = isAdmin || user
     ? ''
-    : `<div class="row"><img class="cap" alt="验证码" title="点图刷新" onclick="refreshCap(this)">
+    : capV
+      ? `<div class="row"><span class="cap-box" title="点图刷新" style="cursor:pointer;display:inline-flex" onclick="refreshCap2(this)">${capSvg}</span><input type="hidden" name="cap" class="cap-v" value="${capV}">
+              <input name="captcha" maxlength="4" placeholder="验证码" required style="max-width:110px"></div>`
+      : `<div class="row"><img class="cap" alt="验证码" title="点图刷新" onclick="refreshCap(this)">
               <input name="captcha" maxlength="4" placeholder="验证码" required style="max-width:110px"></div>`;
   const cmtForm =
     !locked && settings.comments_enabled === '1'
@@ -847,7 +863,7 @@ ${(user || adminView) ? `<div class="dm-mask" id="dm-mask" onclick="if(event.tar
   <h3 id="dm-title">私信</h3>
   <input type="hidden" id="dm-to" value="">
   <textarea id="dm-text" maxlength="200" placeholder="写下你想说的话（最多 200 字）"></textarea>
-  ${adminView ? '' : '<div class="row"><img class="cap" id="dm-cap-img" alt="验证码" title="点图刷新" onclick="refreshCap(this)"><input id="dm-cap" maxlength="4" placeholder="验证码"></div>'}
+  ${adminView ? '' : '<div class="row"><span id="dm-cap-box" title="点图刷新" style="cursor:pointer;display:inline-flex" onclick="fetchDmCap()"></span><input type="hidden" id="dm-cap-v" value=""><input id="dm-cap" maxlength="4" placeholder="验证码"></div>'}
   <div class="dm-err" id="dm-err"></div>
   <div class="btn-row" style="margin-top:6px"><button class="btn" type="button" onclick="sendDm()">发送</button><button class="btn ghost" type="button" onclick="closeDm()">取消</button></div>
  </div>

@@ -172,16 +172,10 @@ export async function loginPage(env, url) {
     <form method="post" action="/admin/login">
       <label>管理员密码</label><input name="password" type="password" required autofocus>
       <label>验证码</label>
-      <div class="row"><span id="login-cap" title="点图刷新" style="cursor:pointer;display:inline-flex" onclick="fetch('/admin/login/captcha').then(function(r){return r.json()}).then(function(j){document.getElementById('login-cap').innerHTML=j.svg;document.getElementById('login-cap-v').value=j.v}).catch(function(){})">${cap.svg}</span><input type="hidden" name="cap" id="login-cap-v" value="${cap.cookieValue}"><input name="captcha" maxlength="4" placeholder="输入图中数字" required style="max-width:140px"></div>
+      <div class="row"><span id="login-cap" title="点图刷新" style="cursor:pointer;display:inline-flex" onclick="fetch('/captcha/challenge').then(function(r){return r.json()}).then(function(j){document.getElementById('login-cap').innerHTML=j.svg;document.getElementById('login-cap-v').value=j.v}).catch(function(){})">${cap.svg}</span><input type="hidden" name="cap" id="login-cap-v" value="${cap.cookieValue}"><input name="captcha" maxlength="4" placeholder="输入图中数字" required style="max-width:140px"></div>
       <button class="btn" type="submit">登录</button>
     </form>
     <p class="hint"><a href="/">← 回到首页</a></p></div>`);
-}
-
-export async function loginCaptcha(env) {
-  const s = await getSettings(env);
-  const cap = await createCaptcha(s.site_secret);
-  return new Response(JSON.stringify({ v: cap.cookieValue, svg: cap.svg }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 }
 
 export async function loginPost(env, request) {
@@ -1056,6 +1050,7 @@ export async function userRegisterPage(env, url) {
   }
   const err = url.searchParams.get('e');
   const next = safeNext(url.searchParams.get('next'));
+  const cap = await createCaptcha(s.site_secret);
   const errs = { captcha: '验证码不对，请重新填写。', name: '用户名要 2~16 个字，且不能带链接等内容。', taken: '这个用户名已经被注册了，换一个试试。', mislead: '这个用户名含有容易让人误会的词（像管理员、官方、admin 之类），换一个试试。', pw: '密码至少 6 位，且两次输入要一致。', many: '同一网络今天注册的账号太多了，请明天再试。' };
   return page('注册', `<div class="card"><h1>📝 注册账号</h1>
     ${err && errs[err] ? `<div class="err">${errs[err]}</div>` : ''}
@@ -1065,7 +1060,7 @@ export async function userRegisterPage(env, url) {
       <label>密码（至少 6 位）</label><input name="password" type="password" required minlength="6" autocomplete="new-password">
       <label>再输一遍密码</label><input name="password2" type="password" required minlength="6" autocomplete="new-password">
       <label>验证码</label>
-      <div style="display:flex;gap:8px;align-items:flex-start"><img src="/captcha" alt="验证码" title="点图刷新" onclick="this.src='/captcha?t='+Date.now()" style="height:40px;border-radius:6px;cursor:pointer;border:1px solid #ddd"><input name="captcha" maxlength="4" required style="max-width:120px" placeholder="输入图中数字"></div>
+      <div style="display:flex;gap:8px;align-items:flex-start"><span id="reg-cap" title="点图刷新" style="cursor:pointer;display:inline-flex" onclick="fetch('/captcha/challenge').then(function(r){return r.json()}).then(function(j){document.getElementById('reg-cap').innerHTML=j.svg;document.getElementById('reg-cap-v').value=j.v}).catch(function(){})">${cap.svg}</span><input type="hidden" name="cap" id="reg-cap-v" value="${cap.cookieValue}"><input name="captcha" maxlength="4" required style="max-width:120px" placeholder="输入图中数字"></div>
       <button class="btn" type="submit">注册并登录</button>
     </form>
     <p class="hint" style="margin-top:12px">已有账号？<a href="/login?next=${encodeURIComponent(next)}">去登录</a></p></div>`);
@@ -1078,7 +1073,7 @@ export async function userRegisterPost(env, request) {
   const back = (e) => redirect(`/register?e=${e}&next=${encodeURIComponent(next)}`);
   if (s.registration_open !== '1') return redirect('/');
   const cookies = parseCookies(request);
-  if (!(await verifyCaptcha(s.site_secret, cookies.mm_captcha, form.get('captcha')))) return back('captcha');
+  if (!(await verifyCaptcha(s.site_secret, form.get('cap') || cookies.mm_captcha, form.get('captcha')))) return back('captcha');
   const username = String(form.get('username') || '').replace(/["'<>]/g, '').trim();
   if (username.length < 2 || username.length > 16 || /https?:|www\.|\.com|\.cn|\.net/i.test(username)) return back('name');
   // 站长昵称任何人不得占用：英文大小写视为同一个名字（taoge / TAOGE / TaoGe 都算占用）
