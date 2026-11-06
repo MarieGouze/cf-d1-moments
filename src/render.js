@@ -262,10 +262,16 @@ function toggleTheme(){
   document.documentElement.setAttribute('data-theme',cur);
   try{localStorage.setItem('mm_theme',cur)}catch(e){}
 }
+function moveAfter(anchor, el){
+  if(!anchor || !anchor.parentNode || !el) return false;
+  if(anchor.after){ anchor.after(el); return true; }
+  anchor.parentNode.insertBefore(el, anchor.nextSibling);
+  return true;
+}
 function moveCmtHome(id){
   var f=document.getElementById('cmt-form-'+id);
   var home=document.getElementById('cmt-form-home-'+id);
-  if(f && home){ home.after(f); f.dataset.moved=''; }
+  if(f && home){ moveAfter(home, f); f.dataset.moved=''; }
 }
 function toggleCmt(id){
   var f=document.getElementById('cmt-form-'+id);
@@ -292,9 +298,9 @@ function replyTo(btn, memoId, rootId, targetId){
   var name=btn.getAttribute('data-rname')||'';
   var wrap=document.getElementById('cmt-form-'+memoId);
   if(wrap){
-    var anchor=btn.closest('.replies')||btn.closest('.cmt')||btn.closest('.cmt-line');
-    if(anchor && anchor.parentNode){ anchor.after(wrap); wrap.dataset.moved='1'; }
     wrap.classList.add('open');
+    var anchor=btn.closest ? (btn.closest('.replies')||btn.closest('.cmt')||btn.closest('.cmt-line')) : null;
+    if(anchor && moveAfter(anchor, wrap)) wrap.dataset.moved='1';
     var img=wrap.querySelector('img.cap');
     if(img && !img.getAttribute('src')) img.src='/captcha?t='+Date.now();
   }
@@ -307,8 +313,10 @@ function replyTo(btn, memoId, rootId, targetId){
   if(crBtn){ crBtn.style.display=''; crBtn.textContent='取消回复'; }
   var ta=form.querySelector('textarea');
   ta.placeholder='回复 @'+name+' …';
-  ta.focus();
-  ta.scrollIntoView({behavior:'smooth', block:'center'});
+  try{ ta.focus({preventScroll:true}); }catch(e){ try{ ta.focus(); }catch(e2){} }
+  var aim=wrap||ta;
+  try{ aim.scrollIntoView({behavior:'smooth', block:'center'}); }catch(e){ try{ aim.scrollIntoView(); }catch(e2){} }
+  setTimeout(function(){ try{ aim.scrollIntoView({block:'center'}); }catch(e){} }, 350);
 }
 function openLightbox(src){
   var lb=document.getElementById('lightbox');
@@ -350,9 +358,13 @@ document.addEventListener('DOMContentLoaded', function(){
   var name=q.get('rname')||'';
   var wrap=document.querySelector('.cmt-form'); if(!wrap) return;
   var memoId=wrap.id.replace('cmt-form-','');
-  var target=document.getElementById('cmt-'+(q.get('rtarget')||rid));
-  if(target){ var anc=target.closest('.replies')||target; anc.after(wrap); wrap.dataset.moved='1'; }
   wrap.classList.add('open');
+  var target=document.getElementById('cmt-'+(q.get('rtarget')||rid));
+  if(target){
+    var restBox=target.closest ? target.closest('.cmt-rest') : null;
+    if(restBox && !restBox.classList.contains('open')){ restBox.classList.add('open'); var moreL=restBox.nextElementSibling; if(moreL) moreL.textContent='收起评论'; }
+    var anc=(target.closest ? target.closest('.replies') : null)||target; if(moveAfter(anc, wrap)) wrap.dataset.moved='1';
+  }
   var capImg=wrap.querySelector('img.cap');
   if(capImg && !capImg.getAttribute('src')) capImg.src='/captcha?t='+Date.now();
   var form=wrap.querySelector('form'); if(!form) return;
@@ -693,9 +705,14 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
         : c.admin_only && !isAdmin
         ? `<div class="cmt" id="cmt-${c.id}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="ao-hidden">🔒 隐藏评论</span><span class="when">${timeAgo(c.created_at)}</span></div>`
         : `<div class="cmt" id="cmt-${c.id}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}${c.reply_to ? ` <span class="at${atCls(c.reply_to)}">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${c.flag === 'spam' && isAdmin ? '<span class="ao-tag">垃圾评论</span>' : ''}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId},${c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}${myDelCmtBtn(c)}</div>`;
-    cmtHtml = `<div class="cmt-box">${roots
-      .map((r) => row(r, r.id) + (byParent.get(r.id) || []).map((c) => `<div class="replies">${row(c, r.id)}</div>`).join(''))
-      .join('')}</div>`;
+    const thread = (r) => row(r, r.id) + (byParent.get(r.id) || []).map((c) => `<div class="replies">${row(c, r.id)}</div>`).join('');
+    const headThreads = roots.slice(0, 2).map(thread).join('');
+    const tailThreads = roots.slice(2);
+    const totalC = memo.comment_count || comments.length;
+    const tailHtml = tailThreads.length
+      ? `<div class="cmt-rest" id="cmt-rest-${memo.id}">${tailThreads.map(thread).join('')}</div><a class="cmt-more" href="javascript:void(0)" data-total="${totalC}" onclick="toggleAllComments(${memo.id},this)">共 ${totalC} 条评论，点击查看全部</a>`
+      : '';
+    cmtHtml = `<div class="cmt-box">${headThreads}${tailHtml}</div>`;
   }
   const locked = pwLocked || membersLocked;
   if (locked) cmtHtml = '';
