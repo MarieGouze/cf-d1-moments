@@ -1171,7 +1171,16 @@ export async function usersPage(env, url) {
   const total = totalRow ? totalRow.c : 0;
   const pages = Math.max(1, Math.ceil(total / 20));
   const p = Math.min(pages, Math.max(1, parseInt((url && url.searchParams.get('p')) || '1', 10) || 1));
-  const { results } = await env.DB.prepare('SELECT id, username, avatar, reg_ip, status, created_at, last_login_at, login_count, last_ip, last_geo, last_ua FROM users ORDER BY id DESC LIMIT 20 OFFSET ?').bind((p - 1) * 20).all();
+  const sortKeys = { reg: 'id', login: 'login_count', comments: 'cmt_count', memos: 'memo_count' };
+  const sort = sortKeys[(url && url.searchParams.get('sort')) || 'reg'] ? ((url && url.searchParams.get('sort')) || 'reg') : 'reg';
+  const dir = (url && url.searchParams.get('dir')) === 'asc' ? 'ASC' : 'DESC';
+  const { results } = await env.DB.prepare(`SELECT id, username, avatar, reg_ip, status, created_at, last_login_at, login_count, last_ip, last_geo, last_ua, (SELECT COUNT(*) FROM comments WHERE comments.name = users.username) AS cmt_count, (SELECT COUNT(*) FROM memos WHERE memos.author_id = users.id) AS memo_count FROM users ORDER BY ${sortKeys[sort]} ${dir}, id DESC LIMIT 20 OFFSET ?`).bind((p - 1) * 20).all();
+  const sortLink = (key, label) => {
+    const active = sort === key;
+    const nextDir = active && dir === 'DESC' ? 'asc' : 'desc';
+    return `<a href="/admin/users?sort=${key}&dir=${nextDir}"${active ? ' style="font-weight:700"' : ''}>${label}${active ? (dir === 'DESC' ? ' ↓' : ' ↑') : ''}</a>`;
+  };
+  const sortBar = `<p style="margin:2px 0 10px">排序：${sortLink('reg', '注册时间')} · ${sortLink('login', '登录次数')} · ${sortLink('comments', '留言数')} · ${sortLink('memos', '动态数')}</p>`;
   const fmt = (ts) => ts ? new Date((ts + 28800) * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—';
   const actForms = (u) => `${u.status
     ? `<form method="post" action="/admin/users/${u.id}/enable" style="display:inline"><button class="btn" style="padding:4px 10px">启用</button></form>`
@@ -1180,7 +1189,7 @@ export async function usersPage(env, url) {
   const head = (u) => `${u.avatar ? `<img src="${esc(u.avatar)}" alt="" style="width:26px;height:26px;border-radius:50%;vertical-align:middle;margin-right:6px">` : ''}<a href="/admin/users/${u.id}"><b>${esc(u.username)}</b></a> <span class="hint">#${u.id}</span>${u.status ? ' <span class="hint" style="color:#e5484d">（已禁用）</span>' : ''}`;
   const dev = (u) => u.last_ua ? `<span title="${esc(u.last_ua)}">${esc(deviceOf(u.last_ua))} · ${esc(parseUa(u.last_ua))}</span>` : '—';
   const rows = (results || []).map((u) => `<tr>
-      <td>${head(u)}<div class="hint">注册 IP ${esc(u.reg_ip || '—')}</div></td>
+      <td>${head(u)}<div class="hint">注册 IP ${esc(u.reg_ip || '—')} · 留言 ${u.cmt_count || 0} · 动态 ${u.memo_count || 0}</div></td>
       <td style="white-space:nowrap">${fmt(u.created_at)}</td>
       <td style="white-space:nowrap">${fmt(u.last_login_at)}<div class="hint">共登录 ${u.login_count || 0} 次</div></td>
       <td class="u-dev">${dev(u)}</td>
@@ -1191,13 +1200,14 @@ export async function usersPage(env, url) {
   // 手机端不用宽表格（列多必然挤出框）：改成一人一张小卡片，信息逐行摆、按钮在右上角
   const cards = (results || []).map((u) => `<div class="u-card">
       <div class="u-top">${head(u)}<span class="u-acts">${actForms(u)}</span></div>
-      <div class="u-meta">注册：${fmt(u.created_at)}（IP ${esc(u.reg_ip || '—')}）<br>最后登录：${fmt(u.last_login_at)}（共登录 ${u.login_count || 0} 次）<br>设备：${dev(u)}<br>IP：${esc(u.last_ip || '—')}<br>地址：${esc(geoText(u.last_geo) || '—')}</div>
+      <div class="u-meta">注册：${fmt(u.created_at)}（IP ${esc(u.reg_ip || '—')}） · 留言 ${u.cmt_count || 0} · 动态 ${u.memo_count || 0}<br>最后登录：${fmt(u.last_login_at)}（共登录 ${u.login_count || 0} 次）<br>设备：${dev(u)}<br>IP：${esc(u.last_ip || '—')}<br>地址：${esc(geoText(u.last_geo) || '—')}</div>
     </div>`).join('');
   return page('后台 · 注册用户', `${nav()}
     <div class="card"><h2>👥 注册用户（共 ${total} 人）</h2>
     <p class="hint">「最后登录」记录的是该用户最近一次登录/注册时的设备、系统、IP 与大致地址（来自接入网络，可能不精确）。禁用后立即失效且不能登录，启用即恢复；删除只删账号与会话，不删除他发过的评论。开放/关闭注册在「站点设置」里。点用户名可查看他发布的全部动态与留言。</p>
+    ${sortBar}
     ${rows ? `<div class="u-table"><table><tr><th>用户</th><th>注册时间</th><th>最后登录</th><th>设备 · 系统</th><th>IP</th><th>地址</th><th></th></tr>${rows}</table></div><div class="u-cards">${cards}</div>` : '<p class="hint">还没有注册用户。</p>'}
-    ${pages > 1 ? `<p style="text-align:center;margin:14px 0 2px">${p > 1 ? `<a href="/admin/users?p=${p - 1}">← 上一页</a>` : '<span class="hint">← 上一页</span>'} <span class="hint">第 ${p} / ${pages} 页</span> ${p < pages ? `<a href="/admin/users?p=${p + 1}">下一页 →</a>` : '<span class="hint">下一页 →</span>'}</p>` : ''}
+    ${pages > 1 ? `<p style="text-align:center;margin:14px 0 2px">${p > 1 ? `<a href="/admin/users?p=${p - 1}&sort=${sort}&dir=${dir.toLowerCase()}">← 上一页</a>` : '<span class="hint">← 上一页</span>'} <span class="hint">第 ${p} / ${pages} 页</span> ${p < pages ? `<a href="/admin/users?p=${p + 1}&sort=${sort}&dir=${dir.toLowerCase()}">下一页 →</a>` : '<span class="hint">下一页 →</span>'}</p>` : ''}
     </div>`);
 }
 
