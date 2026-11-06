@@ -760,8 +760,8 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       <span class="spacer"></span>
       ${locked ? '' : `<button class="act${liked ? ' liked' : ''}" title="点赞" onclick="likeMemo(${memo.id},this)">❤ <span class="lc">${memo.like_count || 0}</span></button>
       ${(detail || isAdmin)
-        ? `<button class="act" type="button" title="回复" onclick="toggleCmt(${memo.id})">💬 ${memo.comment_count || 0}</button>`
-        : `<button class="act" type="button" title="回复" onclick="toggleCmt(${memo.id})">💬 ${memo.comment_count || 0}</button>`}
+        ? `<button class="act" type="button" title="回复" onclick="toggleCmt(${memo.id})"><svg viewBox="0 0 24 24" width="15" height="15" style="vertical-align:-2px" fill="#e5484d" aria-hidden="true"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg> ${memo.comment_count || 0}</button>`
+        : `<button class="act" type="button" title="回复" onclick="toggleCmt(${memo.id})"><svg viewBox="0 0 24 24" width="15" height="15" style="vertical-align:-2px" fill="#e5484d" aria-hidden="true"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg> ${memo.comment_count || 0}</button>`}
       <span class="act" title="浏览量" style="cursor:default">👁️ ${memo.views || 0}</span>`}
     </div>
     <div id="comments">${cmtHtml}${cmtForm}</div>
