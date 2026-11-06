@@ -701,7 +701,7 @@ async function feed(env, origin = '') {
 
 async function coverBing(env, ctx, request, settings, mobile = false) {
   const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
-  const cacheKey = new Request(new URL('/cover/bing/' + (mobile ? 'm480/' : 'd1366/') + today, request.url));
+  const cacheKey = new Request(new URL('/cover/bing/' + (mobile ? 'm720/' : 'd1366/') + today, request.url));
   const cache = caches.default;
   try {
     const hit = await cache.match(cacheKey);
@@ -722,7 +722,7 @@ async function coverBing(env, ctx, request, settings, mobile = false) {
     }
   } catch { /* R2 读不到就现取 */ }
   try {
-    const resp = await fetch(mobile ? 'https://bing.ee123.net/img/?size=480x800' : 'https://bing.ee123.net/img/?size=1366x768', { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const resp = await fetch(mobile ? 'https://bing.ee123.net/img/?size=720x1280' : 'https://bing.ee123.net/img/?size=1366x768', { headers: { 'User-Agent': 'Mozilla/5.0' } });
     const ct = resp.headers.get('Content-Type') || '';
     if (resp.ok && ct.includes('image')) {
       const buf = await resp.arrayBuffer();
