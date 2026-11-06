@@ -326,7 +326,7 @@ async function commentPost(env, request, id) {
   const settings = await getSettings(env);
   const back = `/memo/${id}`;
   if (settings.comments_enabled !== '1') return redirect(`${back}?c=closed`);
-  const memo = await env.DB.prepare('SELECT id, view_password_hash, comments_members_only, members_only FROM memos WHERE id = ?').bind(id).first();
+  const memo = await env.DB.prepare('SELECT id, author_id, view_password_hash, comments_members_only, members_only FROM memos WHERE id = ?').bind(id).first();
   if (!memo) return redirect('/');
   const adminReq = await isAdmin(env, request);
   if (memo.members_only && !adminReq && !(await currentUser(env, request))) {
@@ -419,8 +419,17 @@ async function commentPost(env, request, id) {
   // 发表即通过的评论立刻发通知；待审的等管理员通过时再补发（见后台审核）
   if (status === 'approved' && ins && ins.meta && ins.meta.last_row_id) {
     await notifyForComment(env, { id: ins.meta.last_row_id, memo_id: id, parent_id: parentId, reply_to: replyTo, name, content });
-    if (!adminReq && replyTo && replyTo === String(settings.nickname || '') && name !== replyTo) {
-      await tgNotifyCommentReply(env, new URL(request.url).origin, { memoId: id, rootId: parentId, fromName: name, content });
+    const nick0 = String(settings.nickname || '');
+    const isReplyToAdmin = !!replyTo && replyTo === nick0 && name !== nick0;
+    const isTopOnAdminMemo = parentId === 0 && memo.author_id === 0 && name !== nick0;
+    if (!adminReq && (isReplyToAdmin || isTopOnAdminMemo)) {
+      await tgNotifyCommentReply(env, new URL(request.url).origin, {
+        memoId: id,
+        rootId: isReplyToAdmin ? parentId : ins.meta.last_row_id,
+        fromName: name,
+        content,
+        scene: isReplyToAdmin ? 'reply' : 'comment',
+      });
     }
   }
   return redirect(`${back}?c=${flag || moderation ? 'commented_mod' : 'commented'}`);

@@ -46,11 +46,12 @@ export async function tgNotifyDm(env, origin, { fromId, fromName, content }) {
   } catch { /* 通知失败不影响私信本身 */ }
 }
 
-export async function tgNotifyCommentReply(env, origin, { memoId, rootId, fromName, content }) {
+export async function tgNotifyCommentReply(env, origin, { memoId, rootId, fromName, content, scene }) {
   try {
     const s = await getSettings(env);
     if (!tgReady(s)) return;
-    const text = `💬 ${fromName} 回复了你的留言\n${content}\n—— 动态：${origin}/memo/${memoId}\n（引用本条消息即可回复）`;
+    const head = scene === 'comment' ? `💬 ${fromName} 评论了你的动态` : `💬 ${fromName} 回复了你的留言`;
+    const text = `${head}\n${content}\n—— 动态：${origin}/memo/${memoId}\n（引用本条消息即可回复）`;
     await tgNotify(env, s, text, { kind: 'cmt', memo_id: memoId, root_id: rootId, target_name: fromName });
   } catch { /* 通知失败不影响留言本身 */ }
 }
