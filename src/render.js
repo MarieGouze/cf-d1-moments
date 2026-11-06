@@ -128,7 +128,7 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .reply-btn.del{color:#e5484d}
 .reply-ico{width:15px;height:15px;vertical-align:-2px}
 .cmt-ico-shake{display:inline-block;transform-origin:50% 90%;animation:cmtShake 3s ease-in-out infinite}
-@keyframes cmtShake{0%,48%,100%{transform:none;filter:drop-shadow(0 0 0 rgba(229,72,77,0))}55%{transform:translateX(-3.5px) rotate(-24deg) scale(1.18);filter:drop-shadow(0 0 5px rgba(229,72,77,.85))}62%{transform:translateX(3.5px) rotate(19deg) scale(1.22);filter:drop-shadow(0 0 5px rgba(229,72,77,.85))}69%{transform:translateX(-2.8px) rotate(-13deg) scale(1.14)}76%{transform:translateX(2px) rotate(8deg) scale(1.08)}83%{transform:translateX(-1px) rotate(-4deg)}90%{transform:none}}
+@keyframes cmtShake{0%,52%,100%{transform:none}58%{transform:translateX(-2.5px) rotate(-20deg) scale(1.1)}65%{transform:translateX(2.5px) rotate(16deg) scale(1.13)}72%{transform:translateX(-2px) rotate(-11deg) scale(1.08)}79%{transform:translateX(1.5px) rotate(7deg)}86%{transform:translateX(-0.5px) rotate(-3deg)}93%{transform:none}}
 @media (prefers-reduced-motion:reduce){.cmt-ico-shake{animation:none}}
 [data-theme="dark"] .reply-ico{filter:invert(1)}
 .cmt .at{color:var(--accent)}
@@ -763,8 +763,8 @@ export function memoCard(memo, settings, { comments = [], liked = false, detail 
       <span class="spacer"></span>
       ${locked ? '' : `<button class="act${liked ? ' liked' : ''}" title="点赞" onclick="likeMemo(${memo.id},this)">❤ <span class="lc">${memo.like_count || 0}</span></button>
       ${(detail || isAdmin)
-        ? `<button class="act" type="button" title="回复" onclick="toggleCmt(${memo.id})"><svg class="cmt-ico-shake" viewBox="0 0 24 24" width="17" height="17" style="vertical-align:-2px" fill="#e5484d" aria-hidden="true"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg> ${memo.comment_count || 0}</button>`
-        : `<button class="act" type="button" title="回复" onclick="toggleCmt(${memo.id})"><svg class="cmt-ico-shake" viewBox="0 0 24 24" width="17" height="17" style="vertical-align:-2px" fill="#e5484d" aria-hidden="true"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg> ${memo.comment_count || 0}</button>`}
+        ? `<button class="act" type="button" title="回复" onclick="toggleCmt(${memo.id})"><svg class="cmt-ico-shake" viewBox="0 0 24 24" width="15" height="15" style="vertical-align:-2px" fill="#e5484d" aria-hidden="true"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg> ${memo.comment_count || 0}</button>`
+        : `<button class="act" type="button" title="回复" onclick="toggleCmt(${memo.id})"><svg class="cmt-ico-shake" viewBox="0 0 24 24" width="15" height="15" style="vertical-align:-2px" fill="#e5484d" aria-hidden="true"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg> ${memo.comment_count || 0}</button>`}
       <span class="act" title="浏览量" style="cursor:default">👁️ ${memo.views || 0}</span>`}
     </div>
     <div id="comments">${cmtHtml}${cmtForm}</div>
