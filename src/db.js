@@ -2,7 +2,7 @@
 import { sha256Hex, randomToken, nowSec } from './utils.js';
 
 // 版本号（2026-10-26 用户定）：三段式 2.中.尾——增减功能递增中段、尾段归零；修 bug 只递增尾段。
-export const VERSION = '2.27.0';
+export const VERSION = '2.28.0';
 
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS memos (
@@ -116,6 +116,16 @@ const CREATE_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_comments_ip ON comments(ip, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_comments_status ON comments(status, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_comments_created ON comments(created_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS tg_map (
+    tg_msg_id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL DEFAULT '',
+    user_id INTEGER NOT NULL DEFAULT 0,
+    user_name TEXT NOT NULL DEFAULT '',
+    memo_id INTEGER NOT NULL DEFAULT 0,
+    root_id INTEGER NOT NULL DEFAULT 0,
+    target_name TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT 0
+  )`,
 ];
 
 export const DEFAULT_SETTINGS = {
@@ -135,6 +145,10 @@ export const DEFAULT_SETTINGS = {
   announce_text: '',
   trash_days: '30',
   site_since: '',
+  tg_enabled: '0',
+  tg_bot_token: '',
+  tg_chat_id: '',
+  tg_webhook_secret: '',
   spam_keywords: '博彩,赌场,澳门赌场,威尼斯人,线上棋牌,代开发票,贷款推广,SEO推广,刷单兼职,菠菜,六合彩,时时彩,加微信,微信号,代孕,发票代开',
   links: '[]',
 };

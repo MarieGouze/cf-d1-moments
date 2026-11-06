@@ -7,6 +7,7 @@ import {
   createCaptcha, verifyCaptcha, escapeXml,
 } from './utils.js';
 import { plainTextExcerpt } from './markdown.js';
+import { tgNotifyDm, tgNotifyCommentReply, tgWebhook } from './telegram.js';
 
 const PAGE_SIZE = 10;
 
@@ -418,6 +419,9 @@ async function commentPost(env, request, id) {
   // 发表即通过的评论立刻发通知；待审的等管理员通过时再补发（见后台审核）
   if (status === 'approved' && ins && ins.meta && ins.meta.last_row_id) {
     await notifyForComment(env, { id: ins.meta.last_row_id, memo_id: id, parent_id: parentId, reply_to: replyTo, name, content });
+    if (!adminReq && replyTo && replyTo === String(settings.nickname || '') && name !== replyTo) {
+      await tgNotifyCommentReply(env, new URL(request.url).origin, { memoId: id, rootId: parentId, fromName: name, content });
+    }
   }
   return redirect(`${back}?c=${flag || moderation ? 'commented_mod' : 'commented'}`);
 }
@@ -513,6 +517,9 @@ async function dmSend(env, request) {
   }
   await env.DB.prepare('INSERT INTO messages (from_id, from_name, to_id, to_name, content, created_at) VALUES (?,?,?,?,?,?)')
     .bind(ident.me.id, ident.me.name, to, toName, content, now).run();
+  if (to === 0 && !ident.adminReq) {
+    await tgNotifyDm(env, new URL(request.url).origin, { fromId: ident.me.id, fromName: ident.me.name, content });
+  }
   // 私信不再写 notifications：铃铛角标与消息中心的「私信」板块直接按 messages 未读数算（见 unreadNotifCount / notificationsPage）
   return ajax ? Response.json({ ok: true }) : redirect(back);
 }
@@ -787,6 +794,7 @@ export default {
         ctx.waitUntil(recordVisit(env, request));
       }
 
+      if (path === '/tg/webhook' && method === 'POST') return tgWebhook(env, request);
       if (path === '/captcha/challenge' && method === 'GET') {
         const settings = await getSettings(env);
         const cap = await createCaptcha(settings.site_secret);
@@ -862,6 +870,9 @@ export default {
         if (path === '/admin/settings' && method === 'POST') return admin.settingsSave(env, request);
         if (path === '/admin/settings/password' && method === 'POST') return admin.passwordChange(env, request);
         if (path === '/admin/settings/gate' && method === 'POST') return admin.gateSettingsSave(env, request);
+        if (path === '/admin/settings/telegram' && method === 'POST') return admin.telegramSave(env, request);
+        if (path === '/admin/settings/telegram/test' && method === 'POST') return admin.telegramTest(env, request);
+        if (path === '/admin/settings/telegram/hook' && method === 'POST') return admin.telegramHook(env, request);
         if (path === '/admin/upload' && method === 'POST') return admin.upload(env, request);
         if (path === '/admin/export' && method === 'GET') return admin.exportAll(env);
         if (path === '/admin/export-zip' && method === 'GET') return admin.exportZip(env);

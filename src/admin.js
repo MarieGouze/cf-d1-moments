@@ -10,6 +10,7 @@ import { layout } from './render.js';
 import { plainTextExcerpt } from './markdown.js';
 import { sha256Hex, randomToken, nowSec, escapeHtml as esc, htmlResponse, redirect, clientIp, parseCookies, verifyCaptcha, createCaptcha } from './utils.js';
 import { renderContent, excerptOf } from './richtext.js';
+import { tgReady, tgApi, tgBindWebhook } from './telegram.js';
 
 const ACSS = `
 *{box-sizing:border-box}
@@ -1533,6 +1534,39 @@ export async function commentAction(env, request, id, action) {
 
 // ---------------- 设置 ----------------
 
+export async function telegramSave(env, request) {
+  const form = await request.formData();
+  const s = await getSettings(env);
+  const token = String(form.get('tg_bot_token') || '').trim();
+  if (token) await setSetting(env, 'tg_bot_token', token);
+  await setSetting(env, 'tg_chat_id', String(form.get('tg_chat_id') || '').trim());
+  const enabled = form.get('tg_enabled') ? '1' : '0';
+  await setSetting(env, 'tg_enabled', enabled);
+  const origin = new URL(request.url).origin;
+  const s2 = await getSettings(env);
+  if (enabled === '1' && String(s2.tg_bot_token || '').trim()) {
+    const r = await tgBindWebhook(env, origin);
+    if (!r.ok) return redirect(`/admin/settings?tgerr=${encodeURIComponent('Webhook 绑定失败：' + r.error)}`);
+  }
+  return redirect('/admin/settings?tgok=1');
+}
+
+export async function telegramTest(env, request) {
+  const s = await getSettings(env);
+  if (!tgReady(s)) return redirect(`/admin/settings?tgerr=${encodeURIComponent('请先填写令牌与 Chat ID 并勾选开启、保存一次')}`);
+  const res = await tgApi(s.tg_bot_token, 'sendMessage', { chat_id: s.tg_chat_id, text: '🔔 朋友圈电报通知测试：配置成功。用户私信你或回复你的留言时，我会把消息推到这里；引用那条通知即可直接回复。' });
+  if (res && res.ok) return redirect('/admin/settings?tgok=test');
+  return redirect(`/admin/settings?tgerr=${encodeURIComponent('发送失败：' + ((res && res.description) || '电报接口无响应，请检查令牌'))}`);
+}
+
+export async function telegramHook(env, request) {
+  const s = await getSettings(env);
+  if (!String(s.tg_bot_token || '').trim()) return redirect(`/admin/settings?tgerr=${encodeURIComponent('请先填写并保存机器人令牌')}`);
+  const r = await tgBindWebhook(env, new URL(request.url).origin, { regen: true });
+  if (r.ok) return redirect('/admin/settings?tgok=1');
+  return redirect(`/admin/settings?tgerr=${encodeURIComponent('Webhook 绑定失败：' + r.error)}`);
+}
+
 export async function settingsPage(env, url) {
   const s = await getSettings(env);
   const links = parseJsonSafe(s.links, [])
@@ -1542,11 +1576,17 @@ export async function settingsPage(env, url) {
   const perr = url.searchParams.get('perr') ? '<div class="err">改密失败：当前密码不对，或新密码不足 6 位 / 两次不一致。</div>' : '';
   const pok = url.searchParams.get('pok') ? '<div class="ok">密码已修改，新密码保存在数据库中。</div>' : '';
   const gok = url.searchParams.get('gok') ? '<div class="ok">全站访问密码设置已保存。</div>' : '';
+  const tgok = url.searchParams.get('tgok') === 'test'
+    ? '<div class="ok">测试消息已发出，请查看你的 Telegram。</div>'
+    : url.searchParams.get('tgok')
+      ? '<div class="ok">电报通知设置已保存，Webhook 已绑定。</div>' : '';
+  const tgerr = url.searchParams.get('tgerr')
+    ? `<div class="err">电报设置未完成：${esc(url.searchParams.get('tgerr'))}</div>` : '';
   const gerr = url.searchParams.get('gerr') === 'need'
     ? '<div class="err">要开启全站密码，请先在下面设置一个访问密码。</div>'
     : url.searchParams.get('gerr') === 'len'
       ? '<div class="err">访问密码至少 4 位。</div>' : '';
-  return page('后台 · 站点设置', `${nav()}${msg}${perr}${pok}${gok}${gerr}
+  return page('后台 · 站点设置', `${nav()}${msg}${perr}${pok}${gok}${gerr}${tgok}${tgerr}
     <div class="card"><h2>站点设置</h2>
     <form method="post" action="/admin/settings">
       <label>站点名称</label><input name="site_name" value="${esc(s.site_name)}">
@@ -1586,6 +1626,18 @@ export async function settingsPage(env, url) {
       <input name="site_password" type="password" autocomplete="new-password" placeholder="至少 4 位">
       <p class="hint">访客输对一次后 30 天内免输；重新设置密码会让所有访客重新输入新密码。图片、附件与 RSS 也一并受保护，后台路径 /admin 不受影响。</p>
       <button class="btn" type="submit">保存</button>
+    </form></div>
+    <div class="card"><h2>电报通知（Telegram）</h2>
+    <form method="post" action="/admin/settings/telegram">
+      <label style="display:block;margin:8px 0"><input type="checkbox" name="tg_enabled" value="1" style="width:auto" ${s.tg_enabled === '1' ? 'checked' : ''}> 开启电报通知（用户私信你、或回复你的留言时，推送到你的 Telegram；在电报里引用那条通知即可直接回复）</label>
+      <label>机器人令牌 Bot Token（${s.tg_bot_token ? '已保存，留空 = 不修改' : '未设置'}；找 @BotFather 新建机器人获取）</label>
+      <input name="tg_bot_token" type="password" autocomplete="off" placeholder="123456789:AA……">
+      <label>你的 Chat ID（给机器人发一句话，再开 https://api.telegram.org/bot&lt;令牌&gt;/getUpdates 查看；或问 @userinfobot）</label>
+      <input name="tg_chat_id" value="${esc(s.tg_chat_id || '')}" placeholder="例如 123456789">
+      <p class="hint">Webhook 状态：${s.tg_webhook_secret ? '已生成密钥（保存设置时自动绑定）' : '未绑定（填好令牌并保存后自动绑定）'}。绑定后，在 Telegram 里引用通知消息写回复，就能直接回私信 / 回留言；不是你本人的消息会被忽略。</p>
+      <button class="btn" type="submit">保存并绑定</button>
+      <button class="btn" type="submit" formaction="/admin/settings/telegram/test" style="margin-left:8px">发送测试消息</button>
+      <button class="btn" type="submit" formaction="/admin/settings/telegram/hook" style="margin-left:8px">重新绑定 Webhook</button>
     </form></div>
     <div class="card"><h2>修改管理员密码</h2>
     <form method="post" action="/admin/settings/password">
