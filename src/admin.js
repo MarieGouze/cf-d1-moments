@@ -7,6 +7,7 @@ import {
   notifyForComment, unreadNotifCount,
 } from './db.js';
 import { layout } from './render.js';
+import { plainTextExcerpt } from './markdown.js';
 import { sha256Hex, randomToken, nowSec, escapeHtml as esc, htmlResponse, redirect, clientIp, parseCookies, verifyCaptcha } from './utils.js';
 import { renderContent, excerptOf } from './richtext.js';
 
@@ -1176,7 +1177,7 @@ export async function usersPage(env, url) {
     ? `<form method="post" action="/admin/users/${u.id}/enable" style="display:inline"><button class="btn" style="padding:4px 10px">启用</button></form>`
     : `<form method="post" action="/admin/users/${u.id}/disable" style="display:inline" onsubmit="return confirm('确定禁用用户「${esc(u.username)}」？他将立刻被退出登录且无法再登录（评论保留，可随时启用恢复）。')"><button class="btn ghost" style="padding:4px 10px">禁用</button></form>`}
         <form method="post" action="/admin/users/${u.id}/delete" style="display:inline" onsubmit="return confirm('确定删除用户「${esc(u.username)}」？其登录会话会一并失效（已发出的评论会保留，名字不变）。')"><button class="btn ghost" style="padding:4px 10px">删除</button></form>`;
-  const head = (u) => `${u.avatar ? `<img src="${esc(u.avatar)}" alt="" style="width:26px;height:26px;border-radius:50%;vertical-align:middle;margin-right:6px">` : ''}<b>${esc(u.username)}</b> <span class="hint">#${u.id}</span>${u.status ? ' <span class="hint" style="color:#e5484d">（已禁用）</span>' : ''}`;
+  const head = (u) => `${u.avatar ? `<img src="${esc(u.avatar)}" alt="" style="width:26px;height:26px;border-radius:50%;vertical-align:middle;margin-right:6px">` : ''}<a href="/admin/users/${u.id}"><b>${esc(u.username)}</b></a> <span class="hint">#${u.id}</span>${u.status ? ' <span class="hint" style="color:#e5484d">（已禁用）</span>' : ''}`;
   const dev = (u) => u.last_ua ? `<span title="${esc(u.last_ua)}">${esc(deviceOf(u.last_ua))} · ${esc(parseUa(u.last_ua))}</span>` : '—';
   const rows = (results || []).map((u) => `<tr>
       <td>${head(u)}<div class="hint">注册 IP ${esc(u.reg_ip || '—')}</div></td>
@@ -1194,10 +1195,43 @@ export async function usersPage(env, url) {
     </div>`).join('');
   return page('后台 · 注册用户', `${nav()}
     <div class="card"><h2>👥 注册用户（共 ${total} 人）</h2>
-    <p class="hint">「最后登录」记录的是该用户最近一次登录/注册时的设备、系统、IP 与大致地址（来自接入网络，可能不精确）。禁用后立即失效且不能登录，启用即恢复；删除只删账号与会话，不删除他发过的评论。开放/关闭注册在「站点设置」里。</p>
+    <p class="hint">「最后登录」记录的是该用户最近一次登录/注册时的设备、系统、IP 与大致地址（来自接入网络，可能不精确）。禁用后立即失效且不能登录，启用即恢复；删除只删账号与会话，不删除他发过的评论。开放/关闭注册在「站点设置」里。点用户名可查看他发布的全部动态与留言。</p>
     ${rows ? `<div class="u-table"><table><tr><th>用户</th><th>注册时间</th><th>最后登录</th><th>设备 · 系统</th><th>IP</th><th>地址</th><th></th></tr>${rows}</table></div><div class="u-cards">${cards}</div>` : '<p class="hint">还没有注册用户。</p>'}
     ${pages > 1 ? `<p style="text-align:center;margin:14px 0 2px">${p > 1 ? `<a href="/admin/users?p=${p - 1}">← 上一页</a>` : '<span class="hint">← 上一页</span>'} <span class="hint">第 ${p} / ${pages} 页</span> ${p < pages ? `<a href="/admin/users?p=${p + 1}">下一页 →</a>` : '<span class="hint">下一页 →</span>'}</p>` : ''}
     </div>`);
+}
+
+export async function userDetailPage(env, id) {
+  const u = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first();
+  if (!u) return redirect('/admin/users');
+  const fmt = (ts) => ts ? new Date((ts + 28800) * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—';
+  const { results: memos } = await env.DB.prepare('SELECT id, title, content_md, created_at, pinned, hidden FROM memos WHERE author_id = ? ORDER BY id DESC LIMIT 100').bind(id).all();
+  const { results: cmts } = await env.DB.prepare(`SELECT c.id, c.memo_id, c.content, c.status, c.flag, c.parent_id, c.reply_to, c.created_at, m.title AS m_title, m.content_md AS m_content FROM comments c LEFT JOIN memos m ON m.id = c.memo_id WHERE c.name = ? ORDER BY c.id DESC LIMIT 200`).bind(u.username).all();
+  const actForms = `${u.status
+    ? `<form method="post" action="/admin/users/${u.id}/enable" style="display:inline"><button class="btn" style="padding:4px 10px">启用</button></form>`
+    : `<form method="post" action="/admin/users/${u.id}/disable" style="display:inline" onsubmit="return confirm('确定禁用用户「${esc(u.username)}」？他将立刻被退出登录且无法再登录（评论保留，可随时启用恢复）。')"><button class="btn ghost" style="padding:4px 10px">禁用</button></form>`}
+        <form method="post" action="/admin/users/${u.id}/delete" style="display:inline" onsubmit="return confirm('确定删除用户「${esc(u.username)}」？其登录会话会一并失效（已发出的评论会保留，名字不变）。')"><button class="btn ghost" style="padding:4px 10px">删除</button></form>`;
+  const memoRows = (memos || []).map((mm) => `<div style="padding:8px 0;border-bottom:1px dashed var(--line)">
+      <a href="/memo/${mm.id}">${esc(mm.title || plainTextExcerpt(mm.content_md, 60) || '（图片动态）')}</a>${mm.pinned ? ' 📌' : ''}${mm.hidden ? ' <span class="hint" style="color:#e5484d">（已隐藏）</span>' : ''}${mm.created_at > nowSec() ? ' <span class="hint">（定时待发）</span>' : ''}
+      <div class="hint">${fmt(mm.created_at)}</div>
+    </div>`).join('');
+  const cmtRows = (cmts || []).map((c) => {
+    const state = c.flag === 'spam' ? '<span style="color:#e5484d">垃圾留言</span>' : c.status === 'pending' ? '<span style="color:#d97706">待审核</span>' : c.status === 'hidden' ? '<span class="hint">已隐藏</span>' : '<span class="hint">已通过</span>';
+    const text = c.content.length > 140 ? c.content.slice(0, 140) + '…' : c.content;
+    return `<div style="padding:8px 0;border-bottom:1px dashed var(--line)">
+      <div>${esc(text)}</div>
+      <div class="hint">${fmt(c.created_at)} · ${state}${c.parent_id ? ` · 回复 @${esc(c.reply_to || '')}` : ' · 留言'} · 在 <a href="/memo/${c.memo_id}">${esc(c.m_title || plainTextExcerpt(c.m_content || '', 30) || ('动态 #' + c.memo_id))}</a> 下</div>
+    </div>`;
+  }).join('');
+  return page('后台 · 用户 ' + u.username, `${nav()}
+    <div class="card"><h2>${u.avatar ? `<img src="${esc(u.avatar)}" alt="" style="width:30px;height:30px;border-radius:50%;vertical-align:middle;margin-right:8px">` : ''}${esc(u.username)} <span class="hint">#${u.id}</span>${u.status ? ' <span class="hint" style="color:#e5484d">（已禁用）</span>' : ''}</h2>
+    <p class="hint">注册：${fmt(u.created_at)}（IP ${esc(u.reg_ip || '—')}） · 最后登录：${fmt(u.last_login_at)}（共登录 ${u.login_count || 0} 次）<br>设备：${u.last_ua ? esc(deviceOf(u.last_ua)) + ' · ' + esc(parseUa(u.last_ua)) : '—'} · IP：${esc(u.last_ip || '—')} · 地址：${esc(geoText(u.last_geo) || '—')}</p>
+    <p>${actForms}</p>
+    <p><a href="/admin/users">← 返回用户列表</a></p></div>
+    <div class="card"><h2>📝 发布的动态（${(memos || []).length} 条）</h2>
+    ${memoRows || '<p class="hint">还没有发布过动态。</p>'}</div>
+    <div class="card"><h2>💬 发表的留言与回复（${(cmts || []).length} 条）</h2>
+    ${cmtRows || '<p class="hint">还没有发表过留言。</p>'}</div>`);
 }
 
 export async function userSetStatus(env, request, id, status) {

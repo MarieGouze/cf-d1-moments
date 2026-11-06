@@ -841,6 +841,7 @@ export default {
           return admin.trashAction(env, Number(m[1]), m[2]);
         }
         if (path === '/admin/users' && method === 'GET') return admin.usersPage(env, url);
+        if ((m = path.match(/^\/admin\/users\/(\d+)$/)) && method === 'GET') return admin.userDetailPage(env, Number(m[1]));
         if ((m = path.match(/^\/admin\/users\/(\d+)\/(delete|disable|enable)$/)) && method === 'POST') {
           if (m[2] === 'delete') return admin.userDelete(env, request, Number(m[1]));
           return admin.userSetStatus(env, request, Number(m[1]), m[2] === 'disable' ? 1 : 0);
