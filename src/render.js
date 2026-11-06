@@ -128,7 +128,7 @@ a.reply-btn{display:inline-block;text-decoration:none}
 .reply-btn.del{color:#e5484d}
 .reply-ico{width:15px;height:15px;vertical-align:-2px}
 .cmt-ico-shake{display:inline-block;transform-origin:50% 90%;animation:cmtShake 3s ease-in-out infinite}
-@keyframes cmtShake{0%,58%,100%{transform:rotate(0)}64%{transform:rotate(-13deg)}71%{transform:rotate(10deg)}78%{transform:rotate(-7deg)}85%{transform:rotate(4deg)}92%{transform:rotate(0)}}
+@keyframes cmtShake{0%,52%,100%{transform:none}58%{transform:translateX(-2.5px) rotate(-20deg) scale(1.1)}65%{transform:translateX(2.5px) rotate(16deg) scale(1.13)}72%{transform:translateX(-2px) rotate(-11deg) scale(1.08)}79%{transform:translateX(1.5px) rotate(7deg)}86%{transform:translateX(-0.5px) rotate(-3deg)}93%{transform:none}}
 @media (prefers-reduced-motion:reduce){.cmt-ico-shake{animation:none}}
 [data-theme="dark"] .reply-ico{filter:invert(1)}
 .cmt .at{color:var(--accent)}
