@@ -812,6 +812,7 @@ export default {
       if (path === '/admin/setup') {
         return method === 'GET' ? admin.setupPage(env, url) : admin.setupPost(env, request);
       }
+      if (path === '/admin/login/captcha' && method === 'GET') return admin.loginCaptcha(env);
       if (path === '/admin/login') {
         return method === 'GET' ? admin.loginPage(env, url) : admin.loginPost(env, request);
       }

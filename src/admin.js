@@ -8,7 +8,7 @@ import {
 } from './db.js';
 import { layout } from './render.js';
 import { plainTextExcerpt } from './markdown.js';
-import { sha256Hex, randomToken, nowSec, escapeHtml as esc, htmlResponse, redirect, clientIp, parseCookies, verifyCaptcha } from './utils.js';
+import { sha256Hex, randomToken, nowSec, escapeHtml as esc, htmlResponse, redirect, clientIp, parseCookies, verifyCaptcha, createCaptcha } from './utils.js';
 import { renderContent, excerptOf } from './richtext.js';
 
 const ACSS = `
@@ -157,6 +157,7 @@ async function clearLock(env, ip, prefix = 'llock:') {
 export async function loginPage(env, url) {
   const s = await getSettings(env);
   if (!s.admin_password_hash) return redirect('/admin/setup');
+  const cap = await createCaptcha(s.site_secret);
   let err = '';
   if (url.searchParams.get('e') === 'lock') {
     err = `<div class="err">密码错误次数过多，已暂停登录，请约 ${esc(url.searchParams.get('m') || '10')} 分钟后再试。</div>`;
@@ -171,10 +172,16 @@ export async function loginPage(env, url) {
     <form method="post" action="/admin/login">
       <label>管理员密码</label><input name="password" type="password" required autofocus>
       <label>验证码</label>
-      <div class="row"><img class="cap" alt="验证码" title="点图刷新" onclick="this.src='/captcha?t='+Date.now()" src="/captcha"><input name="captcha" maxlength="4" placeholder="输入图中数字" required style="max-width:140px"></div>
+      <div class="row"><span id="login-cap" title="点图刷新" style="cursor:pointer;display:inline-flex" onclick="fetch('/admin/login/captcha').then(function(r){return r.json()}).then(function(j){document.getElementById('login-cap').innerHTML=j.svg;document.getElementById('login-cap-v').value=j.v}).catch(function(){})">${cap.svg}</span><input type="hidden" name="cap" id="login-cap-v" value="${cap.cookieValue}"><input name="captcha" maxlength="4" placeholder="输入图中数字" required style="max-width:140px"></div>
       <button class="btn" type="submit">登录</button>
     </form>
     <p class="hint"><a href="/">← 回到首页</a></p></div>`);
+}
+
+export async function loginCaptcha(env) {
+  const s = await getSettings(env);
+  const cap = await createCaptcha(s.site_secret);
+  return new Response(JSON.stringify({ v: cap.cookieValue, svg: cap.svg }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 }
 
 export async function loginPost(env, request) {
@@ -187,7 +194,7 @@ export async function loginPost(env, request) {
   const form = await request.formData();
   const settings = await getSettings(env);
   const cookies = parseCookies(request);
-  if (!(await verifyCaptcha(settings.site_secret, cookies.mm_captcha, form.get('captcha')))) {
+  if (!(await verifyCaptcha(settings.site_secret, form.get('cap') || cookies.mm_captcha, form.get('captcha')))) {
     return redirect('/admin/login?e=cap');
   }
   const pw = String(form.get('password') || '');
