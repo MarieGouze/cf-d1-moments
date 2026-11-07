@@ -1170,18 +1170,23 @@ function deviceOf(ua) {
 }
 
 export async function usersPage(env, url) {
-  const totalRow = await env.DB.prepare('SELECT COUNT(*) AS c FROM users').first();
+  const q = String((url && url.searchParams.get('q')) || '').trim().slice(0, 30);
+  const like = q ? '%' + q.replace(/[%_\\]/g, '\\$&') + '%' : '';
+  const whereSql = q ? "WHERE username LIKE ? ESCAPE '\\'" : '';
+  const totalRow = q
+    ? await env.DB.prepare('SELECT COUNT(*) AS c FROM users ' + whereSql).bind(like).first()
+    : await env.DB.prepare('SELECT COUNT(*) AS c FROM users').first();
   const total = totalRow ? totalRow.c : 0;
   const pages = Math.max(1, Math.ceil(total / 20));
   const p = Math.min(pages, Math.max(1, parseInt((url && url.searchParams.get('p')) || '1', 10) || 1));
   const sortKeys = { reg: 'id', login: 'login_count', comments: 'cmt_count', memos: 'memo_count' };
   const sort = sortKeys[(url && url.searchParams.get('sort')) || 'reg'] ? ((url && url.searchParams.get('sort')) || 'reg') : 'reg';
   const dir = (url && url.searchParams.get('dir')) === 'asc' ? 'ASC' : 'DESC';
-  const { results } = await env.DB.prepare(`SELECT id, username, avatar, reg_ip, status, created_at, last_login_at, login_count, last_ip, last_geo, last_ua, (SELECT COUNT(*) FROM comments WHERE comments.name = users.username) AS cmt_count, (SELECT COUNT(*) FROM memos WHERE memos.author_id = users.id) AS memo_count FROM users ORDER BY ${sortKeys[sort]} ${dir}, id DESC LIMIT 20 OFFSET ?`).bind((p - 1) * 20).all();
+  const { results } = await env.DB.prepare(`SELECT id, username, avatar, reg_ip, status, created_at, last_login_at, login_count, last_ip, last_geo, last_ua, (SELECT COUNT(*) FROM comments WHERE comments.name = users.username) AS cmt_count, (SELECT COUNT(*) FROM memos WHERE memos.author_id = users.id) AS memo_count FROM users ${whereSql} ORDER BY ${sortKeys[sort]} ${dir}, id DESC LIMIT 20 OFFSET ?`).bind(...(q ? [like, (p - 1) * 20] : [(p - 1) * 20])).all();
   const sortLink = (key, label) => {
     const active = sort === key;
     const nextDir = active && dir === 'DESC' ? 'asc' : 'desc';
-    return `<a href="/admin/users?sort=${key}&dir=${nextDir}"${active ? ' style="font-weight:700"' : ''}>${label}${active ? (dir === 'DESC' ? ' ↓' : ' ↑') : ''}</a>`;
+    return `<a href="/admin/users?sort=${key}&dir=${nextDir}${q ? `&q=${encodeURIComponent(q)}` : ''}"${active ? ' style="font-weight:700"' : ''}>${label}${active ? (dir === 'DESC' ? ' ↓' : ' ↑') : ''}</a>`;
   };
   const sortBar = `<p style="margin:2px 0 10px">排序：${sortLink('reg', '注册时间')} · ${sortLink('login', '登录次数')} · ${sortLink('comments', '留言数')} · ${sortLink('memos', '动态数')}</p>`;
   const fmt = (ts) => ts ? new Date((ts + 28800) * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—';
@@ -1208,9 +1213,10 @@ export async function usersPage(env, url) {
   return page('后台 · 注册用户', `${nav()}
     <div class="card"><h2>👥 注册用户（共 ${total} 人）</h2>
     <p class="hint">「最后登录」记录的是该用户最近一次登录/注册时的设备、系统、IP 与大致地址（来自接入网络，可能不精确）。禁用后立即失效且不能登录，启用即恢复；删除只删账号与会话，不删除他发过的评论。开放/关闭注册在「站点设置」里。点用户名可查看他发布的全部动态与留言。</p>
+    <form method="get" action="/admin/users" style="display:flex;gap:8px;align-items:center;margin:0 0 10px;flex-wrap:wrap"><input type="search" name="q" value="${esc(q)}" placeholder="按用户名搜索（支持模糊）" style="flex:1;min-width:160px;margin:0;padding:8px 10px"><button class="btn" style="padding:7px 16px">搜索</button>${q ? `<a href="/admin/users">清除</a><span class="hint">搜索「${esc(q)}」共 ${total} 人</span>` : ''}</form>
     ${sortBar}
-    ${rows ? `<div class="u-table"><table><tr><th>用户</th><th>注册时间</th><th>最后登录</th><th>设备 · 系统</th><th>IP</th><th>地址</th><th></th></tr>${rows}</table></div><div class="u-cards">${cards}</div>` : '<p class="hint">还没有注册用户。</p>'}
-    ${pages > 1 ? `<p style="text-align:center;margin:14px 0 2px">${p > 1 ? `<a href="/admin/users?p=${p - 1}&sort=${sort}&dir=${dir.toLowerCase()}">← 上一页</a>` : '<span class="hint">← 上一页</span>'} <span class="hint">第 ${p} / ${pages} 页</span> ${p < pages ? `<a href="/admin/users?p=${p + 1}&sort=${sort}&dir=${dir.toLowerCase()}">下一页 →</a>` : '<span class="hint">下一页 →</span>'}</p>` : ''}
+    ${rows ? `<div class="u-table"><table><tr><th>用户</th><th>注册时间</th><th>最后登录</th><th>设备 · 系统</th><th>IP</th><th>地址</th><th></th></tr>${rows}</table></div><div class="u-cards">${cards}</div>` : `<p class="hint">${q ? `没有找到名字含「${esc(q)}」的用户。` : '还没有注册用户。'}</p>`}
+    ${pages > 1 ? `<p style="text-align:center;margin:14px 0 2px">${p > 1 ? `<a href="/admin/users?p=${p - 1}&sort=${sort}&dir=${dir.toLowerCase()}${q ? `&q=${encodeURIComponent(q)}` : ''}">← 上一页</a>` : '<span class="hint">← 上一页</span>'} <span class="hint">第 ${p} / ${pages} 页</span> ${p < pages ? `<a href="/admin/users?p=${p + 1}&sort=${sort}&dir=${dir.toLowerCase()}${q ? `&q=${encodeURIComponent(q)}` : ''}">下一页 →</a>` : '<span class="hint">下一页 →</span>'}</p>` : ''}
     </div>`);
 }
 
