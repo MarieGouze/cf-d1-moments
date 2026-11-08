@@ -745,6 +745,26 @@ async function coverBing(env, ctx, request, settings, mobile = false) {
     const ct = resp.headers.get('Content-Type') || '';
     if (resp.ok && ct.includes('image')) {
       const buf = await resp.arrayBuffer();
+      // 防复发（2026-11-08 事故）：源站清晨还没轮换时取到的是昨天的图，若与昨日存图字节相同就不按今天日期入库——短缓存 10 分钟、之后重试，直到取到真新图才存
+      let stale = false;
+      try {
+        const yday = new Date(Date.now() + 8 * 3600 * 1000 - 86400 * 1000).toISOString().slice(0, 10);
+        const yObj = await env.MEDIA.get('bing-cover/' + yday + (mobile ? '-m' : '') + '.jpg');
+        if (yObj) {
+          const yBuf = await yObj.arrayBuffer();
+          if (yBuf.byteLength === buf.byteLength) {
+            const pair = await Promise.all([crypto.subtle.digest('SHA-256', buf), crypto.subtle.digest('SHA-256', yBuf)]);
+            const ha = new Uint8Array(pair[0]);
+            const hb = new Uint8Array(pair[1]);
+            stale = ha.every((v, i) => v === hb[i]);
+          }
+        }
+      } catch { /* 比对失败就按新图正常处理 */ }
+      if (stale) {
+        const outStale = new Response(buf, { headers: { 'Content-Type': ct, 'Cache-Control': 'public, max-age=600' } });
+        try { ctx.waitUntil(cache.put(cacheKey, outStale.clone())); } catch { /* 存不进缓存不影响出图 */ }
+        return outStale;
+      }
       try { ctx.waitUntil(env.MEDIA.put(r2Key, buf, { httpMetadata: { contentType: ct } })); } catch { /* 存不进 R2 不影响出图 */ }
       const out = new Response(buf, { headers: { 'Content-Type': ct, 'Cache-Control': 'public, max-age=43200' } });
       try { ctx.waitUntil(cache.put(cacheKey, out.clone())); } catch { /* 存不进缓存不影响出图 */ }
