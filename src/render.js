@@ -853,7 +853,7 @@ ${settings.cover_mode === 'bing' ? '<link rel="preload" as="image" href="/cover/
   </div>
  </div>
   ${body}
-  <div class="foot-note"><a class="admin-link" href="/admin" title="进入后台">${esc(settings.site_name)}</a> · 记录生活，留住瞬间<br>Powered by v${VERSION} @Marie&nbsp;&nbsp;<a class="foot-gh" href="https://github.com/sandeli/cf-d1-moments" target="_blank" rel="noopener"><img class="gh-ico" src="/media/site/gh.png" alt="GitHub">cf-d1-moments</a>${(settings.site_days_text || settings.visitor_text) ? `<br>${[settings.site_days_text, settings.visitor_text].filter(Boolean).join(' · ')}` : ''}${settings.r2_usage_text ? `<br>${esc(settings.r2_usage_text)}` : ''}${settings.acct_usage_text ? `<br>${esc(settings.acct_usage_text)}` : ''}</div>
+  <div class="foot-note"><a class="admin-link" href="/admin" title="进入后台">${esc(settings.site_name)}</a> · 记录生活，留住瞬间<br>Powered by v${VERSION} @Marie&nbsp;&nbsp;<a class="foot-gh" href="https://github.com/MarieGouze/cf-d1-moments" target="_blank" rel="noopener"><img class="gh-ico" src="/media/site/gh.png" alt="GitHub">cf-d1-moments</a>${(settings.site_days_text || settings.visitor_text) ? `<br>${[settings.site_days_text, settings.visitor_text].filter(Boolean).join(' · ')}` : ''}${settings.r2_usage_text ? `<br>${esc(settings.r2_usage_text)}` : ''}${settings.acct_usage_text ? `<br>${esc(settings.acct_usage_text)}` : ''}</div>
 </div>
 <div class="lightbox" id="lightbox" onclick="closeLightbox()"><img id="lightbox-img" alt=""></div>
 ${(user || adminView) ? `<div class="dm-mask" id="dm-mask" onclick="if(event.target===this)closeDm()">
