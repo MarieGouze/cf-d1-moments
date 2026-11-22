@@ -232,7 +232,7 @@ svg.cmt-ava .fg{fill:var(--sub)}
 .foot-note .admin-link{color:inherit;text-decoration:none;cursor:pointer}
 .foot-gh{display:inline-flex;align-items:center;gap:4px;color:inherit;text-decoration:none;vertical-align:-2px}
 .gh-ico{height:14px;width:auto;display:block}
-[data-theme="dark"] .gh-ico{filter:invert(1)}
+
 .foot-gh:hover{text-decoration:underline}
 .foot-note .admin-link:hover{text-decoration:underline}
 .marquee{display:flex;align-items:center;gap:8px;padding:10px 16px 10px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--text)}
@@ -853,7 +853,7 @@ ${settings.cover_mode === 'bing' ? '<link rel="preload" as="image" href="/cover/
   </div>
  </div>
   ${body}
-  <div class="foot-note"><a class="admin-link" href="/admin" title="进入后台">${esc(settings.site_name)}</a> · 记录生活，留住瞬间<br>Powered by v${VERSION} @Marie&nbsp;&nbsp;<a class="foot-gh" href="https://github.com/MarieGouze/cf-d1-moments" target="_blank" rel="noopener"><img class="gh-ico" src="/media/site/gh.png" alt="GitHub">cf-d1-moments</a>${(settings.site_days_text || settings.visitor_text) ? `<br>${[settings.site_days_text, settings.visitor_text].filter(Boolean).join(' · ')}` : ''}${settings.r2_usage_text ? `<br>${esc(settings.r2_usage_text)}` : ''}${settings.acct_usage_text ? `<br>${esc(settings.acct_usage_text)}` : ''}</div>
+  <div class="foot-note"><a class="admin-link" href="/admin" title="进入后台">${esc(settings.site_name)}</a> · 记录生活，留住瞬间<br>Powered by v${VERSION} @Marie&nbsp;&nbsp;<a class="foot-gh" href="https://github.com/MarieGouze/cf-d1-moments" target="_blank" rel="noopener"><svg class="gh-ico" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>cf-d1-moments</a>${(settings.site_days_text || settings.visitor_text) ? `<br>${[settings.site_days_text, settings.visitor_text].filter(Boolean).join(' · ')}` : ''}${settings.r2_usage_text ? `<br>${esc(settings.r2_usage_text)}` : ''}${settings.acct_usage_text ? `<br>${esc(settings.acct_usage_text)}` : ''}</div>
 </div>
 <div class="lightbox" id="lightbox" onclick="closeLightbox()"><img id="lightbox-img" alt=""></div>
 ${(user || adminView) ? `<div class="dm-mask" id="dm-mask" onclick="if(event.target===this)closeDm()">
