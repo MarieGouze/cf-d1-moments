@@ -819,6 +819,7 @@ export function layout(settings, { title, body, activeTag = '', adminView = fals
     : '';
   const avatarCls = settings.avatar_url ? 'avatar' : 'avatar avatar-fallback';
   const avatarInner = settings.avatar_url ? '' : esc((settings.nickname || '主').slice(0, 1));
+  const pwaIcon = settings.avatar_url || '/favicon.png';
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -826,7 +827,12 @@ export function layout(settings, { title, body, activeTag = '', adminView = fals
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title || settings.site_name)}</title>
 <meta name="description" content="${esc(settings.signature || '')}">
-<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="icon" type="image/png" href="${esc(pwaIcon)}">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="${esc(pwaIcon)}">
+<meta name="theme-color" content="#576b95">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="alternate" type="application/rss+xml" title="${esc(settings.site_name)}" href="/feed.xml">
 ${settings.cover_mode === 'bing' ? '<link rel="preload" as="image" href="/cover/bing" media="(min-width:641px)" fetchpriority="high"><link rel="preload" as="image" href="/cover/bing/m" media="(max-width:640px)" fetchpriority="high">' : ''}<style>${CSS}</style>${settings.cover_mode === 'bing' ? '<style>@media (max-width:640px){.cover{background-image:url(/cover/bing/m) !important}}</style>' : ''}
 <script>try{var t=localStorage.getItem('mm_theme');if(t)document.documentElement.setAttribute('data-theme',t);else if(matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.setAttribute('data-theme','dark')}catch(e){}</script>
@@ -866,7 +872,9 @@ ${(user || adminView) ? `<div class="dm-mask" id="dm-mask" onclick="if(event.tar
   <div class="btn-row" style="margin-top:6px"><button class="btn" type="button" onclick="sendDm()">发送</button><button class="btn ghost" type="button" onclick="closeDm()">取消</button></div>
  </div>
 </div>` : ''}
-<script>${JS}</script>
+<script>${JS}
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
+</script>
 </body>
 </html>`;
 }
