@@ -806,6 +806,36 @@ export default {
     try {
       await initDb(env);
 
+      // --- PWA: Manifest 清单与 Service Worker（不受全站密码门拦截） ---
+      if (path === '/manifest.json' && method === 'GET') {
+        const gs = await getSettings(env);
+        const iconUrl = gs.avatar_url || '/favicon.png';
+        const manifest = {
+          name: gs.site_name || 'Moments',
+          short_name: gs.site_name || 'Moments',
+          description: gs.signature || '极简朋友圈',
+          start_url: '/',
+          display: 'standalone',
+          background_color: '#f4f4f6',
+          theme_color: '#576b95',
+          icons: [
+            { src: iconUrl, sizes: '192x192', type: 'image/png' },
+            { src: iconUrl, sizes: '512x512', type: 'image/png' },
+          ],
+        };
+        return new Response(JSON.stringify(manifest), {
+          headers: { 'Content-Type': 'application/manifest+json; charset=utf-8' },
+        });
+      }
+      if (path === '/sw.js' && method === 'GET') {
+        const sw = `self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener('fetch', () => {});`;
+        return new Response(sw, {
+          headers: { 'Content-Type': 'application/javascript; charset=utf-8' },
+        });
+      }
+
       // 全站密码门：开启后，未解锁的访客只能打开输密码页；
       // 后台路径、输密码页与站点图标不受影响，管理员登录状态直接放行。
       if (!path.startsWith('/admin') && path !== '/gate' && path !== '/favicon.png' && path !== '/favicon.ico') {
