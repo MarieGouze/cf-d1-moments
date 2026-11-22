@@ -228,4 +228,674 @@ svg.cmt-ava .fg{fill:var(--sub)}
 .links-box{background:transparent;border-top:2px solid var(--line-strong);padding:14px 16px 10px;margin:10px -16px -8px}
 .links-box h3{margin:0 0 8px;font-size:15px}
 .links-box a{display:inline-block;margin:3px 10px 3px 0;font-size:14px}
-.foot-note{text-align:center;color:var(--sub);
+.foot-note{text-align:center;color:var(--sub);font-size:12px;margin-top:26px;line-height:1.9}
+.foot-note .admin-link{color:inherit;text-decoration:none;cursor:pointer}
+.foot-gh{display:inline-flex;align-items:center;gap:4px;color:inherit;text-decoration:none;vertical-align:-2px}
+.gh-ico{height:14px;width:auto;display:block}
+[data-theme="dark"] .gh-ico{filter:invert(1)}
+.foot-gh:hover{text-decoration:underline}
+.foot-note .admin-link:hover{text-decoration:underline}
+.marquee{display:flex;align-items:center;gap:8px;padding:10px 16px 10px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--text)}
+.mq-ico{flex:none}
+.mq-track{flex:1;overflow:hidden;white-space:nowrap}
+.mq-text{display:inline-block;padding-left:100%;animation:mqscroll linear infinite;font-weight:700}
+.marquee:hover .mq-text{animation-play-state:paused}
+@keyframes mqscroll{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+.notice{background:#fff7e0;border:1px solid #f0dfa0;color:#6b5c14;border-radius:10px;padding:10px 14px;margin:12px 0;font-size:14px}
+[data-theme="dark"] .notice{background:#33300f;color:#e8d98a;border-color:#55501f}
+.pin{color:#e0a52e;font-size:12px;margin-left:6px}
+@media (max-width:560px){
+  .hero{height:168px}
+  .m-content img{height:200px}
+  .m-body,.m-foot,.cmt-box,.cmt-form,.cmt-lines{margin-left:0}
+  .memo-head .m-avatar{flex:0 0 26px;width:26px;height:26px;border-radius:7px;font-size:13px}
+  .m-foot{flex-wrap:nowrap;gap:6px 7px;font-size:12.5px}
+  .m-foot .act{font-size:12.5px;padding:2px 1px}
+}
+`;
+
+export const JS = `
+function toggleTheme(){
+  var cur=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',cur);
+  try{localStorage.setItem('mm_theme',cur)}catch(e){}
+}
+function moveAfter(anchor, el){
+  if(!anchor || !anchor.parentNode || !el) return false;
+  if(anchor.after){ anchor.after(el); return true; }
+  anchor.parentNode.insertBefore(el, anchor.nextSibling);
+  return true;
+}
+function moveCmtHome(id){
+  var f=document.getElementById('cmt-form-'+id);
+  var home=document.getElementById('cmt-form-home-'+id);
+  if(f && home){ moveAfter(home, f); f.dataset.moved=''; }
+}
+function toggleCmt(id){
+  var f=document.getElementById('cmt-form-'+id);
+  if(!f) return;
+  if(f.dataset.moved==='1'){
+    moveCmtHome(id);
+    cancelReplyState(id);
+    f.classList.add('open');
+  } else {
+    f.classList.toggle('open');
+  }
+  if(f.classList.contains('open')){
+    var rest=document.getElementById('cmt-rest-'+id);
+    if(rest && rest.classList.contains('open')){
+      rest.classList.remove('open');
+      var more=rest.nextElementSibling;
+      if(more) more.textContent='共 '+more.getAttribute('data-total')+' 条评论，点击查看全部';
+    }
+    var img=f.querySelector('img.cap');
+    if(img && !img.getAttribute('src')) img.src='/captcha?t='+Date.now();
+  }
+}
+function replyTo(btn, memoId, rootId, targetId){
+  var name=btn.getAttribute('data-rname')||'';
+  var wrap=document.getElementById('cmt-form-'+memoId);
+  if(wrap){
+    wrap.classList.add('open');
+    var anchor=btn.closest ? (btn.closest('.replies')||btn.closest('.cmt')||btn.closest('.cmt-line')) : null;
+    if(anchor && moveAfter(anchor, wrap)) wrap.dataset.moved='1';
+    var img=wrap.querySelector('img.cap');
+    if(img && !img.getAttribute('src')) img.src='/captcha?t='+Date.now();
+  }
+  var form=document.querySelector('#cmt-form-'+memoId+' form');
+  if(!form) return;
+  form.querySelector('input[name=parent_id]').value=rootId;
+  form.querySelector('input[name=reply_target]').value=targetId||rootId;
+  form.querySelector('input[name=reply_to]').value=name;
+  var crBtn=document.getElementById('cancel-reply-'+memoId);
+  if(crBtn){ crBtn.style.display=''; crBtn.textContent='取消回复'; }
+  var ta=form.querySelector('textarea');
+  ta.placeholder='回复 @'+name+' …';
+  try{ ta.focus({preventScroll:true}); }catch(e){ try{ ta.focus(); }catch(e2){} }
+  var aim=wrap||ta;
+  try{ aim.scrollIntoView({behavior:'smooth', block:'center'}); }catch(e){ try{ aim.scrollIntoView(); }catch(e2){} }
+  setTimeout(function(){ try{ aim.scrollIntoView({block:'center'}); }catch(e){} }, 350);
+}
+function openLightbox(src){
+  var lb=document.getElementById('lightbox');
+  if(!lb) return;
+  document.getElementById('lightbox-img').src=src;
+  lb.classList.add('open');
+}
+function closeLightbox(){
+  var lb=document.getElementById('lightbox');
+  if(lb) lb.classList.remove('open');
+}
+document.addEventListener('click', function(e){
+  var t=e.target;
+  if(t && t.tagName==='IMG' && t.closest('.m-body') && !t.closest('a') && !t.closest('.ext-card')) openLightbox(t.src);
+});
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeLightbox(); });
+// 抖音播放框：框大小固定（宽 327x 缩放、高以 380 为上限），不再等比——
+// 实测播放器画面只占窗口左侧约 327 宽、约九成高，横向按 327 对齐框宽、纵向多拉 1/0.9 把画面撑满整框，多出的白边由 overflow 裁掉。
+function fitDy(){
+  document.querySelectorAll('.dy-scale').forEach(function(w){
+    var f=w.querySelector('iframe'); if(!f) return;
+    var avail=w.parentElement ? w.parentElement.clientWidth : 360;
+    var s=Math.min(avail/360, 380/640);
+    if(!(s>0)) return;
+    f.style.transform='scale('+s+','+(s/0.9)+')';
+    w.style.width=(327*s)+'px';
+    w.style.height=(640*s)+'px';
+  });
+}
+// 从消息/详情页按返回回到时间线时，浏览器可能直接恢复冻结的旧页面快照（bfcache），新回复看不见：恢复时强制刷新一次拿最新
+window.addEventListener('pageshow', function(e){ if (e.persisted) location.reload(); });
+document.addEventListener('DOMContentLoaded', fitDy);
+window.addEventListener('resize', fitDy);
+window.addEventListener('load', fitDy);
+// 从首页评论的回复图标跳进详情页时（?reply=顶层评论id&rname=昵称），自动展开评论框并预设回复对象
+document.addEventListener('DOMContentLoaded', function(){
+  var q=new URLSearchParams(location.search);
+  var rid=q.get('reply'); if(!rid) return;
+  var name=q.get('rname')||'';
+  var wrap=document.querySelector('.cmt-form'); if(!wrap) return;
+  var memoId=wrap.id.replace('cmt-form-','');
+  wrap.classList.add('open');
+  var target=document.getElementById('cmt-'+(q.get('rtarget')||rid));
+  if(target){
+    var restBox=target.closest ? target.closest('.cmt-rest') : null;
+    if(restBox && !restBox.classList.contains('open')){ restBox.classList.add('open'); var moreL=restBox.nextElementSibling; if(moreL) moreL.textContent='收起评论'; }
+    var anc=(target.closest ? target.closest('.replies') : null)||target; if(moveAfter(anc, wrap)) wrap.dataset.moved='1';
+  }
+  var capImg=wrap.querySelector('img.cap');
+  if(capImg && !capImg.getAttribute('src')) capImg.src='/captcha?t='+Date.now();
+  var form=wrap.querySelector('form'); if(!form) return;
+  form.querySelector('input[name=parent_id]').value=rid;
+  form.querySelector('input[name=reply_target]').value=q.get('rtarget')||rid;
+  form.querySelector('input[name=reply_to]').value=name;
+  var cancel=document.getElementById('cancel-reply-'+memoId);
+  if(cancel){ cancel.style.display=''; cancel.textContent='取消回复'; }
+  var ta=form.querySelector('textarea');
+  if(name) ta.placeholder='回复 @'+name+' …';
+  var anchor=document.getElementById('comments');
+  if(anchor) anchor.scrollIntoView({behavior:'smooth', block:'center'});
+});
+function toggleAllComments(memoId, el){
+  var rest=document.getElementById('cmt-rest-'+memoId);
+  if(!rest) return;
+  var open=rest.classList.toggle('open');
+  el.textContent=open?'收起评论':'共 '+el.getAttribute('data-total')+' 条评论，点击查看全部';
+}
+function toggleEmoji(memoId){
+  document.getElementById('emoji-panel-'+memoId).classList.toggle('open');
+}
+function insertEmoji(memoId, btn){
+  var form=document.querySelector('#cmt-form-'+memoId+' form');
+  var ta=form.querySelector('textarea');
+  var text=btn.textContent;
+  var s=(typeof ta.selectionStart==='number')?ta.selectionStart:ta.value.length;
+  var e=(typeof ta.selectionEnd==='number')?ta.selectionEnd:s;
+  ta.value=ta.value.slice(0,s)+text+ta.value.slice(e);
+  var pos=s+text.length;
+  ta.focus();
+  try{ ta.setSelectionRange(pos,pos); }catch(err){}
+}
+function cancelReplyState(memoId){
+  var form=document.querySelector('#cmt-form-'+memoId+' form');
+  if(!form) return;
+  form.querySelector('input[name=parent_id]').value='0';
+  form.querySelector('input[name=reply_target]').value='0';
+  form.querySelector('input[name=reply_to]').value='';
+  var crBtn=document.getElementById('cancel-reply-'+memoId);
+  if(crBtn){ crBtn.style.display=''; crBtn.textContent='取消'; }
+  var ta=form.querySelector('textarea');
+  if(ta) ta.placeholder=ta.getAttribute('data-ph')||'写下你的评论';
+}
+function cancelReply(memoId){
+  moveCmtHome(memoId);
+  var wrap=document.getElementById('cmt-form-'+memoId);
+  if(wrap) wrap.classList.remove('open');
+  var form=document.querySelector('#cmt-form-'+memoId+' form');
+  if(!form) return;
+  form.querySelector('input[name=parent_id]').value='0';
+  form.querySelector('input[name=reply_target]').value='0';
+  form.querySelector('input[name=reply_to]').value='';
+  var crBtn2=document.getElementById('cancel-reply-'+memoId);
+  if(crBtn2){ crBtn2.style.display=''; crBtn2.textContent='取消'; }
+  var ta=form.querySelector('textarea');
+  ta.value='';
+  ta.placeholder=ta.getAttribute('data-ph')||'写下你的评论';
+}
+function refreshCap(img){ img.src='/captcha?t='+Date.now(); }
+function refreshCap2(box){
+  fetch('/captcha/challenge').then(function(r){return r.json()}).then(function(j){
+    box.innerHTML=j.svg;
+    var row=box.parentElement; var inp=row ? row.querySelector('.cap-v') : null; if(inp) inp.value=j.v;
+  }).catch(function(){});
+}
+function fetchDmCap(){
+  fetch('/captcha/challenge').then(function(r){return r.json()}).then(function(j){
+    var b=document.getElementById('dm-cap-box'); if(b) b.innerHTML=j.svg;
+    var v=document.getElementById('dm-cap-v'); if(v) v.value=j.v;
+  }).catch(function(){});
+}
+function toggleForum(btn){
+  var item=btn.closest('.fr-item'); if(!item) return;
+  var body=item.querySelector('.fr-body');
+  var willOpen=body.hasAttribute('hidden');
+  document.querySelectorAll('.fr-body').forEach(function(b){ b.setAttribute('hidden',''); });
+  document.querySelectorAll('.fr-bar.open').forEach(function(b){ b.classList.remove('open'); });
+  if(willOpen){ body.removeAttribute('hidden'); btn.classList.add('open'); }
+}
+function openDm(uid, name){
+  var m=document.getElementById('dm-mask'); if(!m) return;
+  document.getElementById('dm-to').value=uid;
+  document.getElementById('dm-title').textContent='私信给 '+name;
+  document.getElementById('dm-err').textContent='';
+  document.getElementById('dm-text').value='';
+  var cap=document.getElementById('dm-cap'); if(cap) cap.value='';
+  fetchDmCap();
+  m.classList.add('open');
+  document.getElementById('dm-text').focus();
+}
+function closeDm(){ var m=document.getElementById('dm-mask'); if(m) m.classList.remove('open'); }
+document.addEventListener('click', function(e){
+  var t=e.target && e.target.closest ? e.target.closest('[data-dm]') : null;
+  if(t) openDm(t.getAttribute('data-dm'), t.getAttribute('data-dmname') || '');
+});
+async function sendDm(){
+  var err=document.getElementById('dm-err');
+  var fd=new URLSearchParams();
+  fd.set('to', document.getElementById('dm-to').value);
+  fd.set('content', document.getElementById('dm-text').value.trim());
+  fd.set('ajax', '1');
+  var cap=document.getElementById('dm-cap'); if(cap) fd.set('captcha', cap.value);
+  var capv=document.getElementById('dm-cap-v'); if(capv) fd.set('cap', capv.value);
+  try{
+    var r=await fetch('/dm/send', {method:'POST', body: fd});
+    var d=await r.json();
+    if(d && d.ok){ closeDm(); }
+    else{
+      err.textContent=(d && d.error) || '发送失败';
+      fetchDmCap();
+    }
+  }catch(e){ err.textContent='发送失败，请重试'; }
+}
+async function likeMemo(id,btn){
+  try{
+    var r=await fetch('/memo/'+id+'/like',{method:'POST'});
+    var d=await r.json();
+    if(d&&typeof d.likes==='number'){
+      btn.querySelector('.lc').textContent=d.likes;
+      btn.classList.toggle('liked',!!d.liked);
+    }
+  }catch(e){}
+}
+`;
+
+export function timeAgo(ts) {
+  const now = Math.floor(Date.now() / 1000);
+  const diff = Math.max(0, now - ts);
+  if (diff < 60) return '刚刚';
+  if (diff < 3600) return Math.floor(diff / 60) + '分钟前';
+  if (diff < 86400) return Math.floor(diff / 3600) + '小时前';
+  // 超过 24 小时：直接显示「月-日 时:分」（北京时间）
+  const d = new Date(ts * 1000 + 8 * 3600 * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日 ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+
+const FILE_TYPES = {
+  zip: ['ZIP', '#7c5cd6'], rar: ['ZIP', '#7c5cd6'], '7z': ['ZIP', '#7c5cd6'], tar: ['ZIP', '#7c5cd6'], gz: ['ZIP', '#7c5cd6'],
+  pdf: ['PDF', '#d64545'],
+  doc: ['DOC', '#3b78c3'], docx: ['DOC', '#3b78c3'],
+  xls: ['XLS', '#3f9e4d'], xlsx: ['XLS', '#3f9e4d'], csv: ['XLS', '#3f9e4d'],
+  ppt: ['PPT', '#d97c2b'], pptx: ['PPT', '#d97c2b'],
+  apk: ['APK', '#58a05c'],
+  txt: ['TXT', '#8a8f98'], md: ['TXT', '#8a8f98'],
+};
+const EMOJIS = ['😀','😁','😂','🤣','😊','😍','😘','😎','😜','🤪','😇','🙂','😉','😌','😴','🥳','😤','😭','😱','👍','👎','👏','🙏','💪','👌','✌️','❤️','💔','💯','🔥','🎉','🌹','☀️','🌙','⭐','✅','❌','🚀','🐶','🐱','🍺','☕','🎂'];
+
+const DOWNLOAD_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+
+
+function fileList(media, dlCounts = {}) {
+  const files = (media || []).filter((m) => m && m.url && m.type === 'file');
+  if (!files.length) return '';
+  return files
+    .map((m) => {
+      const name = m.name || decodeURIComponent((m.url.split('/').pop() || '附件').split('?')[0]);
+      const ext = (name.match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase() || '';
+      const t = FILE_TYPES[ext];
+      const ico = t
+        ? `<span class="file-ico" style="background:${t[1]}">${t[0]}</span>`
+        : `<span class="file-ico" style="background:#576b95">${DOWNLOAD_SVG}</span>`;
+      // 本站上传的附件经 /dl 下载计数，卡片上显示已被下载的次数；外链文件直达、不计数
+      const isUp = typeof m.url === 'string' && m.url.startsWith('/media/uploads/');
+      const key = isUp ? m.url.slice('/media/'.length) : '';
+      const href = isUp ? '/dl/' + key.split('/').map(encodeURIComponent).join('/') : m.url;
+      const sub = isUp ? `点击下载 · 已下载 ${dlCounts[key] || 0} 次` : '点击下载';
+      return `<a class="file-card" href="${esc(href)}" download>${ico}<span class="file-meta"><span class="file-name">${esc(name)}</span><span class="file-sub">${sub}</span></span></a>`;
+    })
+    .join('');
+}
+
+// 正文内嵌附件：正文（HTML 或 Markdown 渲染后）里的 {{media:<id>}} 占位符替换成对应附件本体。
+// 独占一段的占位符（<p>{{media:x}}</p>）整段替换；混在文字中的就地替换。被引用的附件不再重复排到文末。
+function mediaItemHtml(m, dlCounts) {
+  if (m.type === 'file') return fileList([m], dlCounts);
+  if (m.type === 'video') return `<div class="vframe"><video src="${esc(m.url)}" controls preload="metadata" playsinline></video></div>`;
+  return `<div class="m-inline"><img src="${esc(m.url)}" loading="lazy" alt=""></div>`;
+}
+
+function applyInlineMedia(html, media, dlCounts, filesLocked) {
+  const byId = new Map();
+  for (const m of media || []) if (m && m.id && m.url) byId.set(String(m.id), m);
+  if (!byId.size) return { html, used: new Set() };
+  const used = new Set();
+  const swap = (id) => {
+    const m = byId.get(id);
+    if (!m) return '';
+    if (m.type === 'file' && filesLocked) return ''; // 附件门控未解锁时文件不内嵌，留在文末走锁定提示
+    used.add(id);
+    return mediaItemHtml(m, dlCounts);
+  };
+  const out = html
+    .replace(/<p>\s*\{\{media:([\w-]+)\}\}\s*<\/p>/g, (w, id) => swap(id))
+    .replace(/\{\{media:([\w-]+)\}\}/g, (w, id) => swap(id));
+  return { html: out, used };
+}
+
+function mediaGrid(media) {
+  const items = (media || []).filter((m) => m && m.url && m.type !== 'file');
+  if (!items.length) return '';
+  // 只有一个视频附件时用统一播放框（整列宽、按原比例完整显示），与嵌入视频同规格
+  if (items.length === 1 && items[0].type === 'video') {
+    return `<div class="vframe"><video src="${esc(items[0].url)}" controls preload="metadata" playsinline></video></div>`;
+  }
+  const cls = 'g' + Math.min(items.length, 9);
+  const cells = items
+    .slice(0, 9)
+    .map((m) =>
+      m.type === 'video'
+        ? `<video src="${esc(m.url)}" controls preload="metadata" playsinline></video>`
+        : `<img src="${esc(m.url)}" loading="lazy" alt="" title="点击查看原图">`
+    )
+    .join('');
+  return `<div class="grid ${cls}">${cells}</div>`;
+}
+
+function extBlock(memo) {
+  const ext = parseJsonSafe(memo.ext_data, {});
+  if (!memo.ext_type) return '';
+  if (memo.ext_type === 'video' && ext.embed) {
+    const vertical = String(ext.embed).includes('open.douyin.com');
+    if (vertical) {
+      // 抖音播放器页有最小布局宽度：按 450x800 设计尺寸渲染再等比缩放进统一框宽，裁掉溢出，绝不出现滚动条
+      return `<div class="ext ext-vertical"><div class="dy-scale"><iframe src="${esc(ext.embed)}" allowfullscreen loading="lazy" scrolling="no" referrerpolicy="no-referrer"></iframe></div></div>`;
+    }
+    return `<div class="ext"><iframe src="${esc(ext.embed)}" allowfullscreen loading="lazy" referrerpolicy="no-referrer"></iframe></div>`;
+  }
+  if (memo.ext_type === 'video' && ext.url) {
+    return `<div class="vframe"><video src="${esc(ext.url)}" controls preload="metadata" playsinline></video></div>`;
+  }
+  if (memo.ext_type === 'music' && ext.embed) {
+    return `<div class="ext" style="border:0"><iframe src="${esc(ext.embed)}" loading="lazy" style="aspect-ratio:auto;height:86px"></iframe></div>`;
+  }
+  if (memo.ext_type === 'music' && ext.url) {
+    return `<div class="ext" style="padding:8px"><audio src="${esc(ext.url)}" controls preload="metadata"></audio></div>`;
+  }
+  if ((memo.ext_type === 'douban' || memo.ext_type === 'link') && ext.url) {
+    const cover = ext.cover ? `<img src="${esc(ext.cover)}" alt="" loading="lazy">` : '';
+    return `<a class="ext ext-card" href="${esc(ext.url)}" target="_blank" rel="noopener">${cover}<span><span class="t">${esc(ext.title || ext.url)}</span><div class="d">${esc(ext.desc || (memo.ext_type === 'douban' ? '豆瓣' : '链接'))}</div></span></a>`;
+  }
+  return '';
+}
+
+// 列表页默认只显示前 120 字，详情页显示全文
+function contentHtml(memo, detail) {
+  const plain = excerptOf(memo.content_md, 1000000);
+  if (!detail && plain.length > 120) {
+    return `<p>${esc(plain.slice(0, 120))}… <a class="more-link" href="/memo/${memo.id}">更多…</a></p>`;
+  }
+  return renderContent(memo.content_md);
+}
+
+export function memoCard(memo, settings, { comments = [], liked = false, detail = false, isAdmin = false, user = null, userAvatars = {}, userIds = {}, filesUnlocked = false, pwLocked = false, membersLocked = false, unlockErr = '', dlCounts = {}, forum = false, capV = '', capSvg = '' } = {}) {
+  const media = parseJsonSafe(memo.media, []);
+  const tags = String(memo.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
+  const avatarStyle = settings.avatar_url
+    ? `style="background-image:url('${esc(settings.avatar_url)}')"`
+    : '';
+  const avatarCls = settings.avatar_url ? 'm-avatar' : 'm-avatar m-avatar-fallback';
+  const avatarInner = settings.avatar_url ? '' : esc((settings.nickname || '主').slice(0, 1));
+  // 注册用户投稿：头像用作者注册时绑定的头像图（无图时回退用户名首字），昵称行显示作者名
+  const isUserPost = memo.author_id > 0;
+  const cardAvatarCls = isUserPost ? (memo.author_avatar ? 'm-avatar' : 'm-avatar m-avatar-fallback') : avatarCls;
+  const cardAvatarStyle = isUserPost
+    ? (memo.author_avatar ? `style="background-image:url('${esc(memo.author_avatar)}')"` : '')
+    : avatarStyle;
+  const cardAvatarInner = isUserPost ? (memo.author_avatar ? '' : esc((memo.author_name || '游').slice(0, 1))) : avatarInner;
+  const cardNick = isUserPost ? esc(memo.author_name || '') : esc(settings.nickname);
+  // 私信入口：登录者（或站长）看别人名字时可点开发私信弹窗；自己、游客名、未登录时只是普通文字
+  const canDm = isAdmin || !!user;
+  const dmLink = (name, uid) => {
+    if (!canDm || uid === null || uid === undefined) return null;
+    if (isAdmin && uid === 0) return null;
+    if (user && uid === user.id) return null;
+    return `<a class="n dm-link" href="javascript:void(0)" data-dm="${uid}" data-dmname="${esc(name)}">${esc(name)}</a>`;
+  };
+  const nickHtml = (() => {
+    const link = dmLink(isUserPost ? (memo.author_name || '') : (settings.nickname || ''), isUserPost ? memo.author_id : 0);
+    return link || cardNick;
+  })();
+  const cmtName = (c) => {
+    const uid = c.name === settings.nickname ? 0 : (userIds[c.name] !== undefined ? userIds[c.name] : null);
+    return dmLink(c.name, uid) || `<span class="n">${esc(c.name)}</span>`;
+  };
+  // 评论区身份标记：站长（昵称与站长相同）挂金色「站长」，动态作者挂蓝色「作者」，一眼可辨；被 @ 的名字同步着色
+  const authorName = isUserPost ? (memo.author_name || '') : (settings.nickname || '');
+  const cmtBadge = (c) => {
+    if (c.name === settings.nickname) return '<span class="cmt-badge boss">站长</span>';
+    if (authorName && c.name === authorName) return '<span class="cmt-badge author">作者</span>';
+    return '';
+  };
+  const atCls = (name) => (name === settings.nickname ? ' at-boss' : (authorName && name === authorName ? ' at-author' : ''));
+  // 列表页：默认显示前 2 条评论（无框、纯文字行），超过 2 条时追加「共 XX 条评论，点击查看全部」
+  // 详情页：显示全部评论（带回复层级）
+  let cmtHtml = '';
+  // 评论头像：站长（昵称与站长相同）用站点头像；游客用内置 micah 头像包（R2 site/avatars/micah/0-99.svg），
+  // 按昵称哈希固定分配，同一昵称永远同一张。图取不到时 onerror 回落为内置剪影。
+  const cmtAvatar = (c) => {
+    if (settings.avatar_url && c.name === settings.nickname) {
+      return `<img class="cmt-ava" src="${esc(settings.avatar_url)}" alt="">`;
+    }
+    // 注册用户用其注册时绑定的头像（注册后不可修改）
+    if (userAvatars[c.name]) {
+      return `<img class="cmt-ava" src="${esc(userAvatars[c.name])}" alt="" loading="lazy">`;
+    }
+    let h = 5381;
+    const name = String(c.name || '');
+    for (let i = 0; i < name.length; i++) h = ((h * 33) ^ name.charCodeAt(i)) >>> 0;
+    const n = h % 100;
+    return `<img class="cmt-ava" src="/media/site/avatars/micah/${n}.svg" alt="" loading="lazy" onerror="this.outerHTML='&lt;svg class=&quot;cmt-ava&quot; viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle class=&quot;fg&quot; cx=&quot;12&quot; cy=&quot;8.6&quot; r=&quot;3.8&quot;/&gt;&lt;path class=&quot;fg&quot; d=&quot;M3.8 20.2c1.5-3.9 4.6-5.7 8.2-5.7s6.7 1.8 8.2 5.7c-2.3 1.9-5.1 2.8-8.2 2.8s-5.9-.9-8.2-2.8z&quot;/&gt;&lt;/svg&gt;'">`;
+  };
+  const delCmtBtn = (c) => isAdmin
+    ? `<form method="post" action="/admin/comments/${c.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条留言？删除后移入垃圾桶。')"><button type="submit" class="reply-btn del" title="删除" aria-label="删除">&#x1F5D1;&#xFE0E;</button></form>`
+    : '';
+  const myDelCmtBtn = (c) => !isAdmin && user && c.name === user.username
+    ? `<form method="post" action="/comments/${c.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条留言？')"><button type="submit" class="reply-btn del" title="删除我的留言" aria-label="删除">&#x1F5D1;&#xFE0E;</button></form>`
+    : '';
+  if (!detail) {
+    const total = memo.comment_count || comments.length;
+    if (comments.length || total > 0) {
+      const line = (c) =>
+        c.flag === 'spam' && !isAdmin
+          ? `<div class="cmt-line${c.parent_id ? ' sub' : ''}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="invalid-cmt">无效评论待修改</span></div>`
+          : c.admin_only && !isAdmin
+          ? `<div class="cmt-line${c.parent_id ? ' sub' : ''}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="ao-hidden">🔒 隐藏评论</span></div>`
+          : `<div class="cmt-line${c.parent_id ? ' sub' : ''}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}${c.reply_to ? ` <span class="at${atCls(c.reply_to)}">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${c.flag === 'spam' && isAdmin ? '<span class="ao-tag">垃圾评论</span>' : ''}${isAdmin
+          ? `<button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${c.parent_id || c.id},${c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>`
+          : `<a class="reply-btn" href="/memo/${memo.id}?reply=${c.parent_id || c.id}&rtarget=${c.id}&rname=${encodeURIComponent(c.name)}#comments" title="回复" aria-label="回复"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></a>`}${delCmtBtn(c)}${myDelCmtBtn(c)}</div>`;
+      const first = comments.slice(0, 2).map(line).join('');
+      const rest = comments.slice(2);
+      const restHtml = rest.length
+        ? `<div class="cmt-rest" id="cmt-rest-${memo.id}">${rest.map(line).join('')}</div>` +
+          `<a class="cmt-more" href="javascript:void(0)" data-total="${total}" onclick="toggleAllComments(${memo.id},this)">共 ${total} 条评论，点击查看全部</a>`
+        : '';
+      cmtHtml = `<div class="cmt-lines">${first}${restHtml}</div>`;
+    }
+  } else if (comments.length) {
+    const roots = comments.filter((c) => !c.parent_id);
+    const byParent = new Map();
+    for (const c of comments) {
+      if (c.parent_id) {
+        if (!byParent.has(c.parent_id)) byParent.set(c.parent_id, []);
+        byParent.get(c.parent_id).push(c);
+      }
+    }
+    const row = (c, rootId) =>
+      c.flag === 'spam' && !isAdmin
+        ? `<div class="cmt" id="cmt-${c.id}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="invalid-cmt">无效评论待修改</span><span class="when">${timeAgo(c.created_at)}</span></div>`
+        : c.admin_only && !isAdmin
+        ? `<div class="cmt" id="cmt-${c.id}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}：<span class="ao-hidden">🔒 隐藏评论</span><span class="when">${timeAgo(c.created_at)}</span></div>`
+        : `<div class="cmt" id="cmt-${c.id}">${cmtAvatar(c)}${cmtName(c)}${cmtBadge(c)}${c.reply_to ? ` <span class="at${atCls(c.reply_to)}">回复 @${esc(c.reply_to)}</span>` : ''}：${esc(c.content)}${c.admin_only && isAdmin ? '<span class="ao-tag">🔒 仅管理员可见</span>' : ''}${c.flag === 'spam' && isAdmin ? '<span class="ao-tag">垃圾评论</span>' : ''}<span class="when">${timeAgo(c.created_at)}</span><button type="button" class="reply-btn" data-rname="${esc(c.name)}" title="回复" aria-label="回复" onclick="replyTo(this,${memo.id},${rootId},${c.id})"><img class="reply-ico" src="/media/site/icons/reply.png" alt="回复"></button>${delCmtBtn(c)}${myDelCmtBtn(c)}</div>`;
+    const thread = (r) => row(r, r.id) + (byParent.get(r.id) || []).map((c) => `<div class="replies">${row(c, r.id)}</div>`).join('');
+    const headThreads = roots.slice(0, 2).map(thread).join('');
+    const tailThreads = roots.slice(2);
+    const totalC = memo.comment_count || comments.length;
+    const tailHtml = tailThreads.length
+      ? `<div class="cmt-rest" id="cmt-rest-${memo.id}">${tailThreads.map(thread).join('')}</div><a class="cmt-more" href="javascript:void(0)" data-total="${totalC}" onclick="toggleAllComments(${memo.id},this)">共 ${totalC} 条评论，点击查看全部</a>`
+      : '';
+    cmtHtml = `<div class="cmt-box">${headThreads}${tailHtml}</div>`;
+  }
+  const locked = pwLocked || membersLocked;
+  if (locked) cmtHtml = '';
+  const membersOnly = memo.comments_members_only && !isAdmin && !user;
+  const identityHtml = isAdmin
+    ? ''
+    : user
+      ? `<div class="hint" style="margin-bottom:8px">以注册用户「${esc(user.username)}」的身份评论</div>`
+      : `<div class="hint" style="margin-bottom:8px">以游客身份评论，昵称随机显示为「游客XXX」，只需填验证码 · <a href="/login">登录</a>${settings.registration_open === '1' ? ' / <a href="/register">注册</a>' : ''}</div>`;
+  const capRow = isAdmin || user
+    ? ''
+    : capV
+      ? `<div class="row"><span class="cap-box" title="点图刷新" style="cursor:pointer;display:inline-flex" onclick="refreshCap2(this)">${capSvg}</span><input type="hidden" name="cap" class="cap-v" value="${capV}">
+              <input name="captcha" maxlength="4" placeholder="验证码" required style="max-width:110px"></div>`
+      : `<div class="row"><img class="cap" alt="验证码" title="点图刷新" onclick="refreshCap(this)">
+              <input name="captcha" maxlength="4" placeholder="验证码" required style="max-width:110px"></div>`;
+  const cmtForm =
+    !locked && settings.comments_enabled === '1'
+      ? membersOnly
+        ? `<div class="cmt-form" id="cmt-form-${memo.id}"><div class="files-gated" style="margin:4px 0">🔒 本动态仅注册用户可评论，<a href="/login?next=/memo/${memo.id}">登录</a>${settings.registration_open === '1' ? ` 或 <a href="/register?next=/memo/${memo.id}">注册</a>` : ''}后即可评论</div></div>`
+        : `<span id="cmt-form-home-${memo.id}" hidden></span><div class="cmt-form" id="cmt-form-${memo.id}">
+          <form method="post" action="/memo/${memo.id}/comment">
+            <input type="text" name="website" tabindex="-1" autocomplete="off" style="display:none" aria-hidden="true">
+            <input type="hidden" name="ft" value="${Math.floor(Date.now() / 1000)}">
+            <input type="hidden" name="parent_id" value="0">
+            <input type="hidden" name="reply_to" value="">
+            <input type="hidden" name="reply_target" value="0">
+            ${identityHtml}${capRow}
+            <textarea name="content" rows="3" maxlength="${user || isAdmin ? 80 : 50}" data-ph="写下你的评论（最多 ${user || isAdmin ? 80 : 50} 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" placeholder="写下你的评论（最多 ${user || isAdmin ? 80 : 50} 字）${isAdmin || settings.comments_moderation === '0' ? '' : '（审核后显示）'}" required></textarea>
+            <div class="btn-row"><button class="btn" type="submit">发表评论</button><button class="btn ghost" type="button" id="cancel-reply-${memo.id}" onclick="cancelReply(${memo.id})">取消</button>${isAdmin ? '' : `<label class="ao-check"><input type="checkbox" name="admin_only" value="1">仅管理员可见</label>`}<button class="emoji-toggle" type="button" title="插入表情" onclick="toggleEmoji(${memo.id})">😊</button></div>
+            <div class="emoji-panel" id="emoji-panel-${memo.id}">${EMOJIS.map((e) => `<button type="button" class="emo" onclick="insertEmoji(${memo.id},this)">${e}</button>`).join('')}</div>
+          </form>
+        </div>`
+      : '';
+  // 正文内嵌附件先替换占位符，被引用的附件从文末列表里摘掉，避免重复出现
+  const filesLocked = !!(memo.files_gated && !filesUnlocked);
+  const inlined = applyInlineMedia(contentHtml(memo, detail), media, dlCounts, filesLocked);
+  const restMedia = media.filter((m) => !(m && m.id && inlined.used.has(String(m.id))));
+  const cardHtml = `<article class="memo">
+    <div class="memo-head">
+      <div class="${cardAvatarCls}" ${cardAvatarStyle}>${cardAvatarInner}</div>
+      <div>
+        <div class="m-nick">${nickHtml}${memo.pinned ? `<span class="pin">${'⭐'.repeat(memo.pinned)} 置顶</span>` : ''}${memo.hidden && isAdmin ? '<span class="pin" style="color:#999">🔒 隐藏</span>' : ''}${memo.view_password_hash && isAdmin ? '<span class="pin">🔑 密码</span>' : ''}${memo.members_only && isAdmin ? '<span class="pin">👥 仅注册用户</span>' : ''}</div>
+      </div>
+    </div>
+    <div class="m-body">
+      ${memo.title ? (detail ? `<div class="m-title">${esc(memo.title)}</div>` : `<a class="m-title-link" href="/memo/${memo.id}"><div class="m-title">${esc(memo.title)}</div></a>`) : ''}
+      ${membersLocked
+        ? `<div class="files-gated">🔒 本动态仅注册用户可见，<a href="/login?next=/memo/${memo.id}">登录</a>${settings.registration_open === '1' ? ` 或 <a href="/register?next=/memo/${memo.id}">注册</a>` : ''}后即可查看</div>`
+        : pwLocked
+        ? `<div class="files-gated">🔒 此动态已设密码保护${detail ? '' : `，<a href="/memo/${memo.id}">输入密码查看 →</a>`}</div>${detail ? `${unlockErr ? `<div style="color:#e5484d;margin-top:8px;font-size:14px">${unlockErr}</div>` : ''}<form method="post" action="/memo/${memo.id}/unlock" style="margin-top:8px;display:flex;gap:8px"><input type="password" name="password" placeholder="输入观看密码" required style="flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text)"><button class="btn" type="submit">查看</button></form>` : ''}`
+        : (memo.content_gated && !filesUnlocked)
+        ? `<div class="files-gated">🔒 本动态内容需回复后可见，<a href="${detail ? '#comments' : `/memo/${memo.id}#comments`}">评论后即可查看</a></div>`
+        : `<div class="m-content">${inlined.html}</div>
+      ${mediaGrid(restMedia)}
+      ${(memo.files_gated && !filesUnlocked && media.some((mm) => mm && mm.url && mm.type === 'file'))
+        ? `<div class="files-gated">🔒 附件文件需回复后可见，<a href="${detail ? '#comments' : `/memo/${memo.id}#comments`}">评论后即可查看</a></div>`
+        : fileList(restMedia, dlCounts)}
+      ${extBlock(memo)}`}
+      ${tags.length ? `<div class="tags">${tags.map((t) => `<a class="tag" href="/tag/${encodeURIComponent(t)}">#${esc(t)}</a>`).join('')}</div>` : ''}
+    </div>
+    <div class="m-foot">
+      <span class="time">${timeAgo(memo.created_at)}</span>
+      ${detail ? '' : `<a href="/memo/${memo.id}" style="color:var(--sub)">详情</a>`}
+      ${isAdmin ? `<a class="act" href="/admin/memos/${memo.id}/edit" style="text-decoration:none">✏️ 编辑</a>` : ''}
+      ${isAdmin ? `<form method="post" action="/admin/memos/${memo.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条动态？评论和点赞会一并移入垃圾桶。')"><button class="act" type="submit" style="color:#e5484d">&#x1F5D1;&#xFE0E; 删除</button></form>` : ''}
+      ${!isAdmin && user && settings.users_can_post === '1' && memo.author_id === user.id ? `<a class="act" href="/post/${memo.id}/edit" style="text-decoration:none">✏️ 编辑</a><form method="post" action="/post/${memo.id}/delete" style="display:inline;margin:0" onsubmit="return confirm('确定删除这条动态？评论和点赞会一并移入垃圾桶。')"><button class="act" type="submit" style="color:#e5484d">&#x1F5D1;&#xFE0E; 删除</button></form>` : ''}
+      <span class="spacer"></span>
+      ${locked ? '' : `<button class="act${liked ? ' liked' : ''}" title="点赞" onclick="likeMemo(${memo.id},this)">❤ <span class="lc">${memo.like_count || 0}</span></button>
+      ${(detail || isAdmin)
+        ? `<button class="act" type="button" title="回复" onclick="toggleCmt(${memo.id})"><svg class="cmt-ico-shake" viewBox="0 0 24 24" width="15" height="15" style="vertical-align:-2px" fill="#e5484d" aria-hidden="true"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" opacity="0.45" transform="translate(0,-0.8) scale(0.62)"/><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" stroke="#ffffff" stroke-width="1.4" transform="translate(4.6,4.2) scale(0.8)"/></svg> ${memo.comment_count || 0}</button>`
+        : `<button class="act" type="button" title="回复" onclick="toggleCmt(${memo.id})"><svg class="cmt-ico-shake" viewBox="0 0 24 24" width="15" height="15" style="vertical-align:-2px" fill="#e5484d" aria-hidden="true"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" opacity="0.45" transform="translate(0,-0.8) scale(0.62)"/><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" stroke="#ffffff" stroke-width="1.4" transform="translate(4.6,4.2) scale(0.8)"/></svg> ${memo.comment_count || 0}</button>`}
+      <span class="act" title="浏览量" style="cursor:default">👁️ ${memo.views || 0}</span>`}
+    </div>
+    <div id="comments">${cmtHtml}${cmtForm}</div>
+  </article>`;
+  if (!forum || detail) return cardHtml;
+  // 论坛模式：整卡收拢成一行标题条（标题优先，无标题时用正文首行摘要顶替），点开才露出完整卡片
+  const firstLine = String(memo.content_md || '').replace(/\{\{media:[\w-]+\}\}/g, ' ').split('\n').map((x) => x.trim()).find((x) => x) || '';
+  const plainFirst = firstLine.replace(/[#>*`\-\\[\]()!|]/g, '').trim();
+  const barTitle = memo.title || plainFirst.slice(0, 60) || (media.length ? '📎 图文动态' : '（无标题）');
+  const barAuthor = isUserPost ? (memo.author_name || '') : (settings.nickname || '');
+  return `<div class="fr-item"><button type="button" class="fr-bar" onclick="toggleForum(this)"><span class="fr-t">${memo.pinned ? `<span class="fr-pin">${'⭐'.repeat(memo.pinned)}</span>` : ''}${esc(barTitle)}</span><span class="fr-meta">${esc(barAuthor)} · ${timeAgo(memo.created_at)} · ❤ ${memo.like_count || 0} · 💬 ${memo.comment_count || 0} · 👁️ ${memo.views || 0}</span><span class="fr-arrow">▾</span></button><div class="fr-body" hidden>${cardHtml}</div></div>`;
+}
+
+export function layout(settings, { title, body, activeTag = '', adminView = false, user = null, notifCount = 0, adminNotifCount = 0 }) {
+  const coverSrc = settings.cover_mode === 'bing' ? '/cover/bing' : settings.cover_url;
+  const coverStyle = coverSrc
+    ? `style="background-image:url('${esc(coverSrc)}')"`
+    : '';
+  const avatarStyle = settings.avatar_url
+    ? `style="background-image:url('${esc(settings.avatar_url)}')"`
+    : '';
+  const avatarCls = settings.avatar_url ? 'avatar' : 'avatar avatar-fallback';
+  const avatarInner = settings.avatar_url ? '' : esc((settings.nickname || '主').slice(0, 1));
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title || settings.site_name)}</title>
+<meta name="description" content="${esc(settings.signature || '')}">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="alternate" type="application/rss+xml" title="${esc(settings.site_name)}" href="/feed.xml">
+${settings.cover_mode === 'bing' ? '<link rel="preload" as="image" href="/cover/bing" media="(min-width:641px)" fetchpriority="high"><link rel="preload" as="image" href="/cover/bing/m" media="(max-width:640px)" fetchpriority="high">' : ''}<style>${CSS}</style>${settings.cover_mode === 'bing' ? '<style>@media (max-width:640px){.cover{background-image:url(/cover/bing/m) !important}}</style>' : ''}
+<script>try{var t=localStorage.getItem('mm_theme');if(t)document.documentElement.setAttribute('data-theme',t);else if(matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.setAttribute('data-theme','dark')}catch(e){}</script>
+</head>
+<body>
+<div class="wrap">
+ <div class="head-box">
+  <button class="theme-btn" onclick="toggleTheme()" title="切换白天 / 黑夜" aria-label="切换白天 / 黑夜"><svg class="ic-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg><svg class="ic-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg></button>
+  <div class="cover" ${coverStyle}></div>
+  <div class="head-inner">
+   <div class="hero">
+    <div class="site-name">${esc(settings.nickname)}</div>
+    <div class="${avatarCls}" ${avatarStyle}>${avatarInner}</div>
+   </div>
+  <div class="head-meta">${esc(settings.signature || '')}</div>
+  <div class="toolbar">
+    <a class="tb-btn${!activeTag ? ' on' : ''}" href="/" title="首页" aria-label="首页"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></a>
+    <span class="spacer"></span>
+    ${!adminView ? (user
+      ? `${settings.users_can_post === '1' ? '<a class="tb-btn" href="/post/new" title="发布动态" aria-label="发布动态"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></a>' : ''}<a class="tb-link bell" href="/notifications" title="消息中心（私信与通知）" aria-label="消息中心"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#f0a500\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:19px;height:19px;vertical-align:-4px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))\"><rect x=\"2\" y=\"4\" width=\"20\" height=\"16\" rx=\"2\"/><path d=\"m22 7-10 6L2 7\"/></svg>${notifCount ? `<span class="nbadge">${notifCount > 99 ? '99+' : notifCount}</span>` : ''}</a><span class="tb-user">${user.avatar ? `<img src="${esc(user.avatar)}" alt="" style="width:20px;height:20px;border-radius:50%;vertical-align:-5px;margin-right:4px">` : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;vertical-align:-5px;margin-right:4px"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>`}${esc(user.username)}</span><a class="tb-btn" href="/logout" title="退出" aria-label="退出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12v.01"/><path d="M13 4.6v15.6a1 1 0 0 1-1.2 1L5 20V5.6a2 2 0 0 1 1.5-1.9l4-1A2 2 0 0 1 13 4.6Z"/></svg></a>`
+      : `<a class="tb-link" href="/login">登录</a>${settings.registration_open === '1' ? '<a class="tb-link" href="/register">注册</a>' : ''}`) : ''}
+    ${adminView ? `<a class="tb-link bell" href="/messages" title="消息中心（私信与通知）" aria-label="消息中心"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#f0a500\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:19px;height:19px;vertical-align:-4px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))\"><rect x=\"2\" y=\"4\" width=\"20\" height=\"16\" rx=\"2\"/><path d=\"m22 7-10 6L2 7\"/></svg>${adminNotifCount ? `<span class="nbadge">${adminNotifCount > 99 ? '99+' : adminNotifCount}</span>` : ''}</a><a class="tb-btn" href="/admin/memos/new" title="发布" aria-label="发布"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></a><a class="tb-btn" href="/admin/logout" title="退出" aria-label="退出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12v.01"/><path d="M13 4.6v15.6a1 1 0 0 1-1.2 1L5 20V5.6a2 2 0 0 1 1.5-1.9l4-1A2 2 0 0 1 13 4.6Z"/></svg></a>` : ''}
+  </div>
+  </div>
+ </div>
+  ${body}
+  <div class="foot-note"><a class="admin-link" href="/admin" title="进入后台">${esc(settings.site_name)}</a> · 记录生活，留住瞬间<br>Powered by v${VERSION} @Marie&nbsp;&nbsp;<a class="foot-gh" href="https://github.com/sandeli/cf-d1-moments" target="_blank" rel="noopener"><img class="gh-ico" src="/media/site/gh.png" alt="GitHub">cf-d1-moments</a>${(settings.site_days_text || settings.visitor_text) ? `<br>${[settings.site_days_text, settings.visitor_text].filter(Boolean).join(' · ')}` : ''}${settings.r2_usage_text ? `<br>${esc(settings.r2_usage_text)}` : ''}${settings.acct_usage_text ? `<br>${esc(settings.acct_usage_text)}` : ''}</div>
+</div>
+<div class="lightbox" id="lightbox" onclick="closeLightbox()"><img id="lightbox-img" alt=""></div>
+${(user || adminView) ? `<div class="dm-mask" id="dm-mask" onclick="if(event.target===this)closeDm()">
+ <div class="dm-box">
+  <h3 id="dm-title">私信</h3>
+  <input type="hidden" id="dm-to" value="">
+  <textarea id="dm-text" maxlength="200" placeholder="写下你想说的话（最多 200 字）"></textarea>
+  ${adminView ? '' : '<div class="row"><span id="dm-cap-box" title="点图刷新" style="cursor:pointer;display:inline-flex" onclick="fetchDmCap()"></span><input type="hidden" id="dm-cap-v" value=""><input id="dm-cap" maxlength="4" placeholder="验证码"></div>'}
+  <div class="dm-err" id="dm-err"></div>
+  <div class="btn-row" style="margin-top:6px"><button class="btn" type="button" onclick="sendDm()">发送</button><button class="btn ghost" type="button" onclick="closeDm()">取消</button></div>
+ </div>
+</div>` : ''}
+<script>${JS}</script>
+</body>
+</html>`;
+}
+
+export function linksBlock(settings) {
+  const links = parseJsonSafe(settings.links, []);
+  if (!links.length) return '';
+  return `<div class="links-box"><h3>友情链接</h3>${links
+    .map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)}</a>`)
+    .join('')}</div>`;
+}
+
+export function pagerHtml(page, hasMore, base) {
+  const prev = page > 1 ? `<a href="${base}${base.includes('?') ? '&' : '?'}page=${page - 1}">← 上一页</a>` : '';
+  const next = hasMore ? `<a href="${base}${base.includes('?') ? '&' : '?'}page=${page + 1}">下一页 →</a>` : '';
+  if (!prev && !next) return '';
+  return `<div class="pager">${prev}<span>第 ${page} 页</span>${next}</div>`;
+}
+
+export function noticeHtml(code) {
+  const map = {
+    commented: '评论已发表，谢谢！',
+    invalid: '评论内容太简略或无意义，换个说法再发吧',
+    commented_mod: '评论已提交，审核通过后就会显示，谢谢！',
+    captcha: '验证码不对，请重新填写。',
+    closed: '评论功能已关闭。',
+    empty: '内容不能为空。',
+    members: '本动态仅注册用户可评论，请先登录或注册。',
+    membersview: '本动态仅注册用户可见，请先登录或注册。',
+  };
+  return code && map[code] ? `<div class="notice">${map[code]}</div>` : '';
+}
