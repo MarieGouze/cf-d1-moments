@@ -8,7 +8,7 @@
     {
       "binding": "DB",
       "database_name": "cf-d1-moments-db",
-      "database_id": "YOUR_D1_DATABASE_ID"
+      "database_id": "88fac307-8b43-49da-b5dd-c443f3f12339"
     }
   ],
   "r2_buckets": [
