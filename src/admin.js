@@ -1130,6 +1130,22 @@ export async function userLoginPost(env, request) {
   if (rec.u && rec.u > now) return back('locked');
   const username = String(form.get('username') || '').trim();
   const pw = String(form.get('password') || '');
+  const settings = await getSettings(env);
+  const adminNick = String(settings.nickname || '').trim().toLowerCase();
+  if (username.toLowerCase() === 'admin' || (adminNick && username.toLowerCase() === adminNick)) {
+    const hash = await effectiveAdminHash(env);
+    if (hash && (await sha256Hex(pw)) === hash) {
+      await clearLock(env, ip, 'ulog:');
+      const session = await createSession(env);
+      return redirect(next, { 'Set-Cookie': sessionCookie(session) });
+    }
+    const nx = now - (rec.w || 0) > 900 ? { n: 0, w: now, u: 0 } : rec;
+    nx.n = (nx.n || 0) + 1;
+    if (!nx.w) nx.w = now;
+    if (nx.n >= 5) nx.u = now + 600;
+    await setLock(env, ip, nx, 'ulog:');
+    return back(nx.u && nx.u > now ? 'locked' : 'bad');
+  }
   const u = await env.DB.prepare('SELECT id, username, password_hash, status FROM users WHERE username = ?').bind(username).first();
   if (u && u.status) return back('disabled');
   if (!u || u.password_hash !== (await userHash(username, pw))) {
